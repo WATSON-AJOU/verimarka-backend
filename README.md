@@ -11,8 +11,23 @@ pip install django djangorestframework django-environ django-cors-headers
 pip install djangorestframework-simplejwt
 ```
 
+마이그레이션
+```
+DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py makemigrations
+DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py migrate
+```
+
 실행
 ```
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py migrate
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
+```
+
+슈퍼유저생성
+```
+DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py createsuperuser
+```
+
+의존성
+```
+pip freeze > requirements.txt
 ```
