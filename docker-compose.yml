@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    container_name: watson-postgres
+    environment:
+      POSTGRES_DB: watson
+      POSTGRES_USER: watson
+      POSTGRES_PASSWORD: watsonpw
+      TZ: Asia/Seoul
+    ports:
+      - "5433:5432" 
+    volumes:
+      - watson_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watson -d watson"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  watson_pgdata:
