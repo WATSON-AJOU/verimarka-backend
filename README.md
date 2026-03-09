@@ -1,14 +1,18 @@
 # WATSON-BACKEND
 
 주소: http://127.0.0.1:8000/
-
+```
+docker compose up -d
+docker compose ps
+DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
+```
 
 가상환경 세팅
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install django djangorestframework django-environ django-cors-headers
-pip install djangorestframework-simplejwt
+pip install django-environ
+pip install -r requirements.txt
 ```
 
 마이그레이션

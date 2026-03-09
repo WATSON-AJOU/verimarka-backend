@@ -107,3 +107,10 @@ GOOGLE_TOKEN_URI = env(
 GOOGLE_USERINFO_URI = env(
     "GOOGLE_USERINFO_URI", default="https://openidconnect.googleapis.com/v1/userinfo"
 )
+
+KAKAO_REST_API_KEY = env("KAKAO_REST_API_KEY", default="")
+KAKAO_CLIENT_SECRET = env("KAKAO_CLIENT_SECRET", default="")
+
+SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
+SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")
+SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
