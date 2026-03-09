@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 
 class User(AbstractUser):
@@ -12,3 +13,16 @@ class User(AbstractUser):
     provider_sub = models.CharField(
         max_length=128, blank=True, null=True
     )  
+
+
+class SmsVerification(models.Model):
+    phone = models.CharField(max_length=20, db_index=True)
+    code_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    send_count = models.PositiveIntegerField(default=0)
+    fail_count = models.PositiveIntegerField(default=0)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
