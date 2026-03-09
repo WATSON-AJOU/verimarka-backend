@@ -21,7 +21,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_extensions",
     "rest_framework",
     "corsheaders",
     "accounts",
@@ -67,7 +66,10 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", default=""),
         "HOST": env("DB_HOST", default=""),
         "PORT": env("DB_PORT", default=""),
-    }
+        "OPTIONS": {
+            "sslmode": env("DB_SSLMODE", default="require"),
+        },
+        }
 }
 
 AUTH_USER_MODEL = "accounts.User"
