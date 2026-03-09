@@ -1,0 +1,40 @@
+services:
+  verimarka-api:
+    container_name: verimarka-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.prod
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  verimarka-nginx:
+    container_name: verimarka-nginx
+    image: nginx:alpine
+    depends_on:
+      - verimarka-api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../WATSON-FRONTEND/verimarka-frontend/dist:/usr/share/nginx/html:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
+      - ./deploy/certbot/conf:/etc/letsencrypt:ro
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - ./deploy/certbot/www:/var/www/certbot
+      - ./deploy/certbot/conf:/etc/letsencrypt
+    entrypoint: /bin/sh -c
+    command: >
+      "trap exit TERM;
+       while :; do
+         certbot renew --webroot -w /var/www/certbot --quiet;
+         sleep 12h;
+       done"
+    restart: unless-stopped
