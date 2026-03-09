@@ -4,15 +4,34 @@ from django.utils import timezone
 
 
 class User(AbstractUser):
-    phone = models.CharField(max_length=20, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
     phone_verified = models.BooleanField(default=False)
 
-    # 소셜용 : 어떤 provider로 가입했는지 기록
-    provider = models.CharField(max_length=20, blank=True, null=True)
-    # 소셜 유저 고유 id
-    provider_sub = models.CharField(
-        max_length=128, blank=True, null=True
-    )  
+
+class SocialAccount(models.Model):
+    PROVIDER_CHOICES = [
+        ("google", "Google"),
+        ("kakao", "Kakao"),
+        ("apple", "Apple"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="social_accounts",
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    provider_sub = models.CharField(max_length=128)
+    email = models.EmailField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "provider_sub"],
+                name="uniq_provider_provider_sub",
+            )
+        ]
 
 
 class SmsVerification(models.Model):
