@@ -66,7 +66,10 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", default=""),
         "HOST": env("DB_HOST", default=""),
         "PORT": env("DB_PORT", default=""),
-    }
+        "OPTIONS": {
+            "sslmode": env("DB_SSLMODE", default="require"),
+        },
+        }
 }
 
 AUTH_USER_MODEL = "accounts.User"
@@ -94,3 +97,13 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
+
+# 구글 로그인
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
+GOOGLE_TOKEN_URI = env(
+    "GOOGLE_TOKEN_URI", default="https://oauth2.googleapis.com/token"
+)
+GOOGLE_USERINFO_URI = env(
+    "GOOGLE_USERINFO_URI", default="https://openidconnect.googleapis.com/v1/userinfo"
+)

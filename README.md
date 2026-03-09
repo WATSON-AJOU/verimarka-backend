@@ -31,3 +31,4 @@ DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py createsuperuser
 ```
 pip freeze > requirements.txt
 ```
+
