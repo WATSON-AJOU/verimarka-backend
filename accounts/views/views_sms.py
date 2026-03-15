@@ -9,9 +9,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 
-from .models import SmsVerification
-from .serializers import PhoneSendSerializer, PhoneVerifySerializer
-from .services.sms_service import (
+from ..models import SmsVerification
+from ..serializers import PhoneSendSerializer, PhoneVerifySerializer
+
+from ..services.sms_service import (
     generate_verification_code,
     send_verification_sms,
     SmsSendError,

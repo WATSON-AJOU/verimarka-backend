@@ -3,9 +3,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 
-from .serializers import MeSerializer, MeUpdateSerializer
+from ..serializers import MeSerializer, MeUpdateSerializer
 
 
+# 내정보조회
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
