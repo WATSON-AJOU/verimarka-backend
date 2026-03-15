@@ -8,14 +8,14 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import SocialAccount
-from .serializers import MeSerializer
-from .services.google_oauth import (
+from ..models import SocialAccount
+from ..serializers import MeSerializer
+from ..services.google_oauth import (
     exchange_code_for_token,
     fetch_userinfo,
     GoogleOAuthError,
 )
-from .services.kakao_oauth import (
+from ..services.kakao_oauth import (
     exchange_code_for_token as kakao_exchange_code_for_token,
     fetch_userinfo as kakao_fetch_userinfo,
     KakaoOAuthError,

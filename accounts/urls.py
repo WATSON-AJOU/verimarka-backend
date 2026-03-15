@@ -1,8 +1,8 @@
 from django.urls import path
-from .views import MeView
-from .views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
-from .views_sms import PhoneSendCodeView, PhoneVerifyCodeView
-from .views_auth import SignupView, LoginView
+from .views.views import MeView
+from .views.views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
+from .views.views_sms import PhoneSendCodeView, PhoneVerifyCodeView
+from .views.views_auth import SignupView, LoginView
 
 urlpatterns = [
     path("me/", MeView.as_view(), name="me"),

@@ -4,7 +4,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import SignupSerializer, LoginSerializer, MeSerializer
+from ..serializers import SignupSerializer, LoginSerializer, MeSerializer
 
 
 class SignupView(APIView):
