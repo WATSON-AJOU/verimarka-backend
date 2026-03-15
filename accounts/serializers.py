@@ -11,9 +11,13 @@ class MeSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "username",
+            "nickname",
+            "display_name",
             "email",
             "phone",
             "phone_verified",
+            "auth_provider",
+            "is_profile_completed",
             "providers",
         )
 
@@ -24,7 +28,18 @@ class MeSerializer(serializers.ModelSerializer):
 class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("username",)
+        fields = ("username", "nickname", "display_name")
+
+    def validate_nickname(self, value):
+        nickname = (value or "").strip()
+        if not nickname:
+            raise serializers.ValidationError("닉네임은 비워둘 수 없습니다.")
+
+        queryset = User.objects.filter(nickname=nickname).exclude(id=self.instance.id)
+        if queryset.exists():
+            raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
+
+        return nickname
 
 
 class PhoneSendSerializer(serializers.Serializer):
@@ -43,6 +58,12 @@ class SignupSerializer(serializers.ModelSerializer):
         model = User
         fields = ("email", "username", "password")
 
+    def validate_username(self, value):
+        username = (value or "").strip()
+        if not username:
+            raise serializers.ValidationError("이름은 비워둘 수 없습니다.")
+        return username
+
     def validate_email(self, value):
         email = (value or "").strip().lower()
         if User.objects.filter(email=email).exists():
@@ -50,8 +71,11 @@ class SignupSerializer(serializers.ModelSerializer):
         return email
 
     def create(self, validated_data):
+        username = validated_data["username"].strip()
         return User.objects.create_user(
-            username=validated_data["username"],
+            username=username,
+            nickname=username,
+            display_name=username,
             email=validated_data["email"],
             password=validated_data["password"],
         )

@@ -1,4 +1,5 @@
 import uuid
+from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
@@ -23,6 +24,18 @@ from ..services.kakao_oauth import (
 
 
 User = get_user_model()
+
+
+def build_social_identity(provider: str, email: str | None) -> dict[str, str]:
+    base_name = (email or provider).split("@")[0].strip() or provider
+    suffix = uuid.uuid4().hex[:8]
+    nickname = f"{base_name[:20]}_{suffix}"
+
+    return {
+        "username": f"{provider}_{uuid.uuid4().hex[:20]}",
+        "nickname": nickname[:30],
+        "display_name": base_name[:50],
+    }
 
 
 class GoogleOAuthLoginView(APIView):
@@ -85,8 +98,12 @@ class GoogleOAuthLoginView(APIView):
                             {"detail": "이미 일반 회원가입 또는 다른 계정에 사용 중인 이메일입니다."},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
+                    identity = build_social_identity("google", email)
                     user = User.objects.create_user(
-                        username=f"google_{uuid.uuid4().hex[:20]}",
+                        username=identity["username"],
+                        nickname=identity["nickname"],
+                        display_name=identity["display_name"],
+                        auth_provider="google",
                         email=email or "",
                     )
                     SocialAccount.objects.create(
@@ -94,12 +111,17 @@ class GoogleOAuthLoginView(APIView):
                         provider="google",
                         provider_sub=sub,
                         email=email or "",
+                        last_login_at=timezone.now(),
                     )
                     created = True
 
                 if email and user.email != email:
                     user.email = email
                     user.save(update_fields=["email"])
+
+                social = SocialAccount.objects.get(provider="google", provider_sub=sub)
+                social.last_login_at = timezone.now()
+                social.save(update_fields=["last_login_at"])
 
         except IntegrityError:
             return Response(
@@ -179,8 +201,12 @@ class KakaoOAuthLoginView(APIView):
                             {"detail": "이미 일반 회원가입 또는 다른 계정에 사용 중인 이메일입니다."},
                             status=status.HTTP_400_BAD_REQUEST,
                         )
+                    identity = build_social_identity("kakao", email)
                     user = User.objects.create_user(
-                        username=f"kakao_{uuid.uuid4().hex[:20]}",
+                        username=identity["username"],
+                        nickname=identity["nickname"],
+                        display_name=identity["display_name"],
+                        auth_provider="kakao",
                         email=email or "",
                     )
                     SocialAccount.objects.create(
@@ -188,12 +214,17 @@ class KakaoOAuthLoginView(APIView):
                         provider="kakao",
                         provider_sub=sub,
                         email=email or "",
+                        last_login_at=timezone.now(),
                     )
                     created = True
 
                 if email and user.email != email:
                     user.email = email
                     user.save(update_fields=["email"])
+
+                social = SocialAccount.objects.get(provider="kakao", provider_sub=sub)
+                social.last_login_at = timezone.now()
+                social.save(update_fields=["last_login_at"])
 
         except IntegrityError:
             return Response(

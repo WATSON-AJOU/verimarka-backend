@@ -11,7 +11,6 @@ DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install django-environ
 pip install -r requirements.txt
 ```
 
@@ -40,7 +39,7 @@ pip freeze > requirements.txt
 앱 구조
 ```
 	•	accounts : 회원가입, 로그인, OAuth, SMS 인증, 프로필, 권한
-    
+
 	•	contents : 이미지/문서 원본 업로드, 상태 관리, 결과 파일
 	•	analysis : AI 판정 요청/응답, 유사도 결과, 후보 이미지, 판정 상태
 	•	reviews : REVIEW 상태 케이스, 투표, 투표 결과

@@ -83,7 +83,6 @@ class SmsVerification(models.Model):
     fail_count = models.PositiveIntegerField(default=0)
     verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    requested_ip = models.GenericIPAddressField(null=True, blank=True)
     purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default="signup")
 
     def is_expired(self):

@@ -76,6 +76,7 @@ class PhoneSendCodeView(APIView):
         code = generate_verification_code()
 
         verification = SmsVerification.objects.create(
+            user=request.user,
             phone=phone,
             code_hash=hash_code(code),
             expires_at=timezone.now() + timedelta(minutes=3),
@@ -112,7 +113,12 @@ class PhoneVerifyCodeView(APIView):
         code = serializer.validated_data["code"]
 
         verification = (
-            SmsVerification.objects.filter(phone=phone).order_by("-created_at").first()
+            SmsVerification.objects.filter(
+                user=request.user,
+                phone=phone,
+            )
+            .order_by("-created_at")
+            .first()
         )
 
         if not verification:
@@ -158,7 +164,10 @@ class PhoneVerifyCodeView(APIView):
 
         request.user.phone = phone
         request.user.phone_verified = True
-        request.user.save(update_fields=["phone", "phone_verified"])
+        request.user.phone_verified_at = timezone.now()
+        request.user.save(
+            update_fields=["phone", "phone_verified", "phone_verified_at"]
+        )
 
         verification.verified_at = timezone.now()
         verification.save(update_fields=["verified_at"])
