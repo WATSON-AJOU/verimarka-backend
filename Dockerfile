@@ -1,10 +1,20 @@
 FROM python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY verimarka-BACKEND/requirements.txt /tmp/backend-requirements.txt
+COPY WATSON_WM/img_guard/requirements.txt /tmp/ai-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt \
+    && pip install --no-cache-dir -r /tmp/ai-requirements.txt
 
-COPY . .
+COPY verimarka-BACKEND /app/verimarka-BACKEND
+COPY WATSON_WM /app/WATSON_WM
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+WORKDIR /app/verimarka-BACKEND
+
+ENV AI_MODEL_ROOT=/app/WATSON_WM/img_guard
+
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
