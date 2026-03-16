@@ -6,8 +6,8 @@ anaconda-anon-usage @ file:///home/task_176160626771849/conda-bld/anaconda-anon-
 anaconda-auth @ file:///opt/miniconda3/conda-bld/anaconda-cloud-auth-split_1759943045113/work
 anaconda-cli-base @ file:///opt/miniconda3/conda-bld/anaconda-cli-base_1762294806728/work
 annotated-doc==0.0.4
-annotated-types @ file:///opt/miniconda3/conda-bld/annotated-types_1761744949290/work
-anyio==4.11.0
+annotated-types==0.7.0
+anyio==4.12.1
 appnope==0.1.4
 archspec @ file:///home/task_175812491784513/conda-bld/archspec_1758124989039/work
 argon2-cffi==25.1.0
@@ -27,7 +27,7 @@ boto3==1.42.34
 botocore==1.42.34
 brotlicffi @ file:///opt/miniconda3/conda-bld/brotlicffi_1761745164052/work
 cachetools==6.2.4
-certifi @ file:///opt/miniconda3/conda-bld/certifi_1759786064465/work/certifi
+certifi==2026.2.25
 cffi @ file:///opt/miniconda3/conda-bld/cffi_1761832773185/work
 cfn-lint==1.43.4
 charset-normalizer @ file:///opt/miniconda3/conda-bld/charset-normalizer_1761744840553/work
@@ -47,8 +47,12 @@ debugpy==1.8.17
 decorator==5.2.1
 defusedxml==0.7.1
 distro @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/distro_1728591855492/work
-Django==6.0.3
-environ==1.0
+Django==6.0.2
+django-cors-headers==4.9.0
+django-environ==0.13.0
+django-extensions==4.1
+djangorestframework==3.16.1
+djangorestframework_simplejwt==5.5.1
 executing==2.2.1
 fastapi==0.110.0
 fastjsonschema==2.21.2
@@ -59,13 +63,18 @@ fqdn==1.5.1
 frozendict @ file:///opt/miniconda3/conda-bld/frozendict_1761750665916/work
 frozenlist==1.8.0
 fsspec==2025.12.0
+ftfy==6.3.1
 gitdb==4.0.12
 GitPython==3.1.46
 h11==0.16.0
+hf-xet==1.4.2
+hnswlib==0.8.0
 httpcore==1.0.9
 httptools==0.7.1
 httpx==0.28.1
+huggingface_hub==1.7.1
 idna @ file:///opt/miniconda3/conda-bld/idna_1761912005426/work
+ImageHash==4.3.2
 ipykernel==7.1.0
 ipython==9.7.0
 ipython_pygments_lexers==1.1.1
@@ -119,6 +128,7 @@ networkx==3.6
 notebook==7.4.7
 notebook_shim==0.2.4
 numpy==1.26.4
+open_clip_torch==3.3.0
 opencv-python==4.10.0.84
 packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079023/work
 pandas==2.3.3
@@ -135,24 +145,27 @@ prompt_toolkit==3.0.52
 propcache==0.4.1
 protobuf==6.33.2
 psutil==7.1.3
+psycopg==3.3.3
+psycopg-binary==3.3.3
 ptyprocess==0.7.0
 pure_eval==0.2.3
 py-cpuinfo==9.0.0
 pyarrow==22.0.0
 pycosat @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_61k1o_oje7/croot/pycosat_1736868429741/work
 pycparser @ file:///opt/miniconda3/conda-bld/pycparser_1757496048647/work
-pydantic @ file:///opt/miniconda3/conda-bld/pydantic_1762505197323/work
+pydantic==2.12.5
 pydantic-settings @ file:///opt/miniconda3/conda-bld/pydantic-settings_1758784213628/work
-pydantic_core @ file:///opt/miniconda3/conda-bld/pydantic-core_1760597286482/work
+pydantic_core==2.41.5
 pydeck==0.9.1
 Pygments @ file:///opt/miniconda3/conda-bld/pygments_1762431584667/work
-PyJWT @ file:///Users/builder/cbouss/buildout/croot/pyjwt_1739484683708/work
+PyJWT==2.11.0
 pyparsing==3.2.5
 PySocks @ file:///opt/miniconda3/conda-bld/pysocks_1761753010927/work
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 python-json-logger==4.0.0
 pytz==2025.2
+PyWavelets==1.9.0
 PyYAML==6.0.3
 pyzmq==27.1.0
 readchar @ file:///opt/miniconda3/conda-bld/readchar_1760613300945/work
@@ -169,6 +182,7 @@ rpds-py==0.29.0
 ruamel.yaml @ file:///opt/miniconda3/conda-bld/ruamel.yaml_1762535951282/work
 ruamel.yaml.clib @ file:///opt/miniconda3/conda-bld/ruamel.yaml.clib_1762530070208/work
 s3transfer==0.16.0
+safetensors==0.7.0
 scipy==1.16.3
 seaborn==0.13.2
 semver @ file:///opt/miniconda3/conda-bld/semver_1761903026306/work
@@ -178,6 +192,7 @@ shellingham @ file:///opt/miniconda3/conda-bld/shellingham_1761912204150/work
 six==1.17.0
 smmap==5.0.2
 sniffio==1.3.1
+solapi==5.0.3
 soupsieve==2.8
 SQLAlchemy==2.0.44
 sqlparse==0.5.5
@@ -187,10 +202,12 @@ streamlit==1.52.2
 sympy==1.14.0
 tenacity==9.1.2
 terminado==0.18.1
+timm==1.0.25
 tinycss2==1.4.0
 toml==0.10.2
 tomli @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_03b1up8uh3/croot/tomli_1753774598375/work
 torch==2.9.1
+torchaudio==2.9.1
 torchvision==0.24.1
 tornado==6.5.2
 tqdm @ file:///opt/miniconda3/conda-bld/tqdm_1762863348900/work
@@ -203,7 +220,7 @@ tzdata==2025.2
 ultralytics==8.3.0
 ultralytics-thop==2.0.18
 uri-template==1.3.0
-urllib3 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_95v32ztwo_/croot/urllib3_1750775480393/work
+urllib3==2.6.3
 uvicorn==0.30.1
 uvloop==0.22.1
 watchfiles==1.1.1
