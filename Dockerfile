@@ -17,6 +17,9 @@ RUN apt-get update \
 COPY verimarka-BACKEND/requirements.txt /tmp/backend-requirements.txt
 COPY WATSON_WM/img_guard/requirements.txt /tmp/ai-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt \
+    && pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 \
     && pip install --no-cache-dir -r /tmp/ai-requirements.txt
 
 COPY verimarka-BACKEND /app/verimarka-BACKEND
