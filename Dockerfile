@@ -17,4 +17,6 @@ WORKDIR /app/verimarka-BACKEND
 
 ENV AI_MODEL_ROOT=/app/WATSON_WM/img_guard
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+RUN chmod +x /app/verimarka-BACKEND/entrypoint.sh
+
+CMD ["/app/verimarka-BACKEND/entrypoint.sh"]
