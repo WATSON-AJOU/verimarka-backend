@@ -4,8 +4,33 @@ from django.utils import timezone
 
 
 class User(AbstractUser):
+    AUTH_PROVIDER_CHOICES = [
+        ("local", "Local"),
+        ("google", "Google"),
+        ("kakao", "Kakao"),
+        ("apple", "Apple"),
+    ]
+
     phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
     phone_verified = models.BooleanField(default=False)
+    phone_verified_at = models.DateTimeField(null=True, blank=True)
+
+    nickname = models.CharField(max_length=30, unique=True)
+    display_name = models.CharField(max_length=50, blank=True)
+    profile_image = models.URLField(blank=True, null=True)
+
+    auth_provider = models.CharField(
+        max_length=20,
+        choices=AUTH_PROVIDER_CHOICES,
+        default="local",
+    )
+    is_profile_completed = models.BooleanField(default=False)
+
+    terms_agreed_at = models.DateTimeField(null=True, blank=True)
+    privacy_agreed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.email or self.username
 
 
 class SocialAccount(models.Model):
@@ -24,6 +49,7 @@ class SocialAccount(models.Model):
     provider_sub = models.CharField(max_length=128)
     email = models.EmailField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    last_login_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -33,8 +59,23 @@ class SocialAccount(models.Model):
             )
         ]
 
+    def __str__(self):
+        return f"{self.provider}:{self.user_id}"
+
 
 class SmsVerification(models.Model):
+    PURPOSE_CHOICES = [
+        ("signup", "Signup"),
+        ("profile_update", "Profile Update"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="sms_verifications",
+        null=True,
+        blank=True,
+    )
     phone = models.CharField(max_length=20, db_index=True)
     code_hash = models.CharField(max_length=128)
     expires_at = models.DateTimeField()
@@ -42,6 +83,10 @@ class SmsVerification(models.Model):
     fail_count = models.PositiveIntegerField(default=0)
     verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default="signup")
 
     def is_expired(self):
         return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        return f"{self.phone} ({self.purpose})"

@@ -8,9 +8,9 @@ env = environ.Env(
     DJANGO_ALLOWED_HOSTS=(list, []),
 )
 
-# .env 파일 로드 (dev/prod에서 env.read_env 호출)
+# .env 파일 로드는 dev.py / prod.py 에서 수행
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="unsafe-secret-key")
-DEBUG = env("DJANGO_DEBUG")
+DEBUG = env.bool("DJANGO_DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
@@ -24,10 +24,16 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "accounts",
+    "analysis",
+    "contents",
+    "logs",
+    "reviews",
+    "tokens",
+    "wallets",
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # CORS는 CommonMiddleware보다 위
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -56,8 +62,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# DB: dev에서는 sqlite로 시작
-# Postgres는 docker-compose로 붙일 예정
 DATABASES = {
     "default": {
         "ENGINE": env("DB_ENGINE", default="django.db.backends.sqlite3"),
@@ -66,20 +70,30 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", default=""),
         "HOST": env("DB_HOST", default=""),
         "PORT": env("DB_PORT", default=""),
-        "OPTIONS": {
-            "sslmode": env("DB_SSLMODE", default="require"),
-        },
-        }
+    }
 }
 
+# PostgreSQL일 때만 OPTIONS 추가
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"]["OPTIONS"] = {
+        "sslmode": env("DB_SSLMODE", default="require"),
+    }
+
 AUTH_USER_MODEL = "accounts.User"
+
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
 ]
 
 LANGUAGE_CODE = "ko-kr"
@@ -87,25 +101,30 @@ TIME_ZONE = "Asia/Seoul"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# DRF + JWT
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+        "accounts.permissions.IsPhoneVerified",
+    ),
 }
 
-# 구글 로그인
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
 GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
 GOOGLE_TOKEN_URI = env(
-    "GOOGLE_TOKEN_URI", default="https://oauth2.googleapis.com/token"
+    "GOOGLE_TOKEN_URI",
+    default="https://oauth2.googleapis.com/token",
 )
 GOOGLE_USERINFO_URI = env(
-    "GOOGLE_USERINFO_URI", default="https://openidconnect.googleapis.com/v1/userinfo"
+    "GOOGLE_USERINFO_URI",
+    default="https://openidconnect.googleapis.com/v1/userinfo",
 )
 
 KAKAO_REST_API_KEY = env("KAKAO_REST_API_KEY", default="")
@@ -114,3 +133,22 @@ KAKAO_CLIENT_SECRET = env("KAKAO_CLIENT_SECRET", default="")
 SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
 SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")
 SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
+
+AI_MODEL_ROOT = env(
+    "AI_MODEL_ROOT",
+    default=str(BASE_DIR.parent / "WATSON_WM" / "img_guard"),
+)
+
+AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
+AWS_DEFAULT_REGION = env("AWS_DEFAULT_REGION", default="")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="")
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="")
+AWS_S3_USE_SSL = env.bool("AWS_S3_USE_SSL", default=True)
+AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="virtual")
+AWS_QUERYSTRING_EXPIRE = env.int("AWS_QUERYSTRING_EXPIRE", default=3600)
+CONTENT_ORIGINAL_PREFIX = env("CONTENT_ORIGINAL_PREFIX", default="original")
+CONTENT_CANDIDATE_PREFIX = env("CONTENT_CANDIDATE_PREFIX", default="candidate")
+CONTENT_RESULT_PREFIX = env("CONTENT_RESULT_PREFIX", default="result")
