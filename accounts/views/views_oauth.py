@@ -38,6 +38,14 @@ def build_social_identity(provider: str, email: str | None) -> dict[str, str]:
     }
 
 
+def get_oauth_agreement_defaults() -> dict[str, timezone.datetime]:
+    agreed_at = timezone.now()
+    return {
+        "terms_agreed_at": agreed_at,
+        "privacy_agreed_at": agreed_at,
+    }
+
+
 class GoogleOAuthLoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -105,6 +113,7 @@ class GoogleOAuthLoginView(APIView):
                         display_name=identity["display_name"],
                         auth_provider="google",
                         email=email or "",
+                        **get_oauth_agreement_defaults(),
                     )
                     SocialAccount.objects.create(
                         user=user,
@@ -208,6 +217,7 @@ class KakaoOAuthLoginView(APIView):
                         display_name=identity["display_name"],
                         auth_provider="kakao",
                         email=email or "",
+                        **get_oauth_agreement_defaults(),
                     )
                     SocialAccount.objects.create(
                         user=user,

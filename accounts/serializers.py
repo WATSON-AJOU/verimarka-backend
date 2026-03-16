@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from django.utils import timezone
 from .models import User
 
 
@@ -53,10 +54,12 @@ class PhoneVerifySerializer(serializers.Serializer):
 
 class SignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    terms_agreed = serializers.BooleanField(write_only=True)
+    privacy_agreed = serializers.BooleanField(write_only=True)
 
     class Meta:
         model = User
-        fields = ("email", "username", "password")
+        fields = ("email", "username", "password", "terms_agreed", "privacy_agreed")
 
     def validate_username(self, value):
         username = (value or "").strip()
@@ -70,14 +73,24 @@ class SignupSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("이미 사용 중인 이메일입니다.")
         return email
 
+    def validate(self, attrs):
+        if not attrs.get("terms_agreed"):
+            raise serializers.ValidationError({"terms_agreed": "이용약관 동의가 필요합니다."})
+        if not attrs.get("privacy_agreed"):
+            raise serializers.ValidationError({"privacy_agreed": "개인정보 처리방침 동의가 필요합니다."})
+        return attrs
+
     def create(self, validated_data):
         username = validated_data["username"].strip()
+        agreed_at = timezone.now()
         return User.objects.create_user(
             username=username,
             nickname=username,
             display_name=username,
             email=validated_data["email"],
             password=validated_data["password"],
+            terms_agreed_at=agreed_at,
+            privacy_agreed_at=agreed_at,
         )
 
 

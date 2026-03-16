@@ -20,7 +20,17 @@ CORS_ALLOWED_ORIGINS = [
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": env(
+            "DB_ENGINE",
+            default="django.db.backends.postgresql",
+        ),
+        "NAME": env("DB_NAME"),
+        "USER": env("DB_USER"),
+        "PASSWORD": env("DB_PASSWORD"),
+        "HOST": env("DB_HOST"),
+        "PORT": env("DB_PORT", default="5432"),
+        "OPTIONS": {
+            "sslmode": env("DB_SSLMODE", default="require"),
+        },
     }
 }

@@ -1,4 +1,5 @@
 import importlib
+import logging
 import sys
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from .contracts import (
     GuardRequestV1,
     GuardResponseV1,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AIIntegrationError(Exception):
@@ -45,6 +48,11 @@ class AnalysisGuardService:
         try:
             request = GuardRequestV1.model_validate(request_dict)
         except ValidationError as exc:
+            logger.exception(
+                "analysis.guard.invalid_request job_id=%s payload=%s",
+                request_dict.get("job_id"),
+                request_dict,
+            )
             raise AIIntegrationError(
                 error_code="INVALID_INPUT",
                 error_message=exc.errors()[0]["msg"],
@@ -54,10 +62,18 @@ class AnalysisGuardService:
             ) from exc
 
         guard_callable = cls._get_guard_callable()
+        logger.info(
+            "analysis.guard.invoke job_id=%s mode=%s content_type=%s input=%s",
+            request.job_id,
+            request.mode,
+            request.content_type,
+            request.input[0].model_dump(exclude_none=True) if request.input else None,
+        )
 
         try:
             response = guard_callable(request.model_dump(exclude_none=True))
         except ValueError as exc:
+            logger.exception("analysis.guard.value_error job_id=%s", request.job_id)
             raise AIIntegrationError(
                 error_code="INVALID_INPUT",
                 error_message=str(exc),
@@ -66,6 +82,7 @@ class AnalysisGuardService:
                 job_id=request.job_id,
             ) from exc
         except RuntimeError as exc:
+            logger.exception("analysis.guard.runtime_error job_id=%s", request.job_id)
             raise AIIntegrationError(
                 error_code="AI_INTERNAL_ERROR",
                 error_message=str(exc) or "AI guard execution failed",
@@ -74,6 +91,7 @@ class AnalysisGuardService:
                 job_id=request.job_id,
             ) from exc
         except Exception as exc:
+            logger.exception("analysis.guard.unexpected_error job_id=%s", request.job_id)
             raise AIIntegrationError(
                 error_code="AI_INTERNAL_ERROR",
                 error_message=str(exc) or "AI guard execution failed",
@@ -84,8 +102,14 @@ class AnalysisGuardService:
 
         try:
             payload = response.model_dump() if hasattr(response, "model_dump") else response
+            logger.info(
+                "analysis.guard.completed job_id=%s payload=%s",
+                request.job_id,
+                payload,
+            )
             return GuardResponseV1.model_validate(payload)
         except ValidationError as exc:
+            logger.exception("analysis.guard.invalid_response job_id=%s payload=%s", request.job_id, payload)
             raise AIIntegrationError(
                 error_code="AI_RESPONSE_INVALID",
                 error_message=exc.errors()[0]["msg"],
@@ -119,7 +143,7 @@ class AnalysisGuardService:
             getattr(
                 settings,
                 "AI_MODEL_ROOT",
-                Path(settings.BASE_DIR) / "aimodel" / "img_guard",
+                Path(settings.BASE_DIR).parent / "WATSON_WM" / "img_guard",
             )
         ).resolve()
 
