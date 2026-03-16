@@ -1,7 +1,25 @@
 from pathlib import Path
 import environ
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
+
+def _find_project_base() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "manage.py").exists():
+            return parent
+    return current.parent.parent.parent
+
+
+def _default_ai_model_root(base_dir: Path) -> str:
+    local_child = base_dir / "WATSON_WM" / "img_guard"
+    if local_child.exists():
+        return str(local_child)
+
+    sibling_child = base_dir.parent / "WATSON_WM" / "img_guard"
+    return str(sibling_child)
+
+
+BASE_DIR = _find_project_base()
 
 env = environ.Env(
     DJANGO_DEBUG=(bool, False),
@@ -136,7 +154,7 @@ SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
 
 AI_MODEL_ROOT = env(
     "AI_MODEL_ROOT",
-    default=str(BASE_DIR.parent / "WATSON_WM" / "img_guard"),
+    default=_default_ai_model_root(BASE_DIR),
 )
 
 AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)
