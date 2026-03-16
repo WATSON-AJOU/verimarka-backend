@@ -170,3 +170,45 @@ AWS_QUERYSTRING_EXPIRE = env.int("AWS_QUERYSTRING_EXPIRE", default=3600)
 CONTENT_ORIGINAL_PREFIX = env("CONTENT_ORIGINAL_PREFIX", default="original")
 CONTENT_CANDIDATE_PREFIX = env("CONTENT_CANDIDATE_PREFIX", default="candidate")
 CONTENT_RESULT_PREFIX = env("CONTENT_RESULT_PREFIX", default="result")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(levelname)s:%(name)s:%(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "analysis": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "contents": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "accounts": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
