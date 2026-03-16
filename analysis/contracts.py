@@ -1,29 +1,32 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, model_validator
 
 
 class GuardInputItem(BaseModel):
-    url: str
-    filename: str
-    mime_type: str
+    url: str | None = None
+    s3_uri: str | None = None
+    s3_key: str | None = None
+    filename: str | None = None
+    mime_type: str | None = None
 
-
-class GuardMeta(BaseModel):
-    user_id: str
-    content_id: str
+    @model_validator(mode="after")
+    def validate_source(self):
+        if not (self.url or self.s3_uri or self.s3_key):
+            raise ValueError("input item requires one of: url, s3_uri, s3_key")
+        return self
 
 
 class GuardSearchOptions(BaseModel):
-    top_k: int = 10
-    top_phash: int = 10
+    top_k: int | None = 10
+    top_phash: int | None = 10
 
 
 class GuardWatermarkOptions(BaseModel):
-    apply_on_allow: bool = True
-    model: str = "wam"
-    nbits: int = 32
-    scaling_w: float = 2.0
+    apply_on_allow: bool | None = True
+    model: str | None = "wam"
+    nbits: int | None = 32
+    scaling_w: float | None = 2.0
     proportion_masked: float = Field(default=0.35, ge=0.0, le=1.0)
 
 
@@ -37,7 +40,7 @@ class GuardRequestV1(BaseModel):
     mode: Literal["register"] = "register"
     content_type: Literal["image"] = "image"
     input: list[GuardInputItem] = Field(min_length=1)
-    meta: GuardMeta
+    meta: dict[str, Any] = Field(default_factory=dict)
     options: GuardOptions = GuardOptions()
 
 

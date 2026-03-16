@@ -136,7 +136,7 @@ SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
 
 AI_MODEL_ROOT = env(
     "AI_MODEL_ROOT",
-    default=str(BASE_DIR / "aimodel" / "img_guard"),
+    default=str(BASE_DIR.parent / "WATSON_WM" / "img_guard"),
 )
 
 AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)

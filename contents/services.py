@@ -1,5 +1,5 @@
+import logging
 from pathlib import Path
-from urllib.parse import quote
 
 from django.conf import settings
 from django.utils import timezone
@@ -9,6 +9,8 @@ from analysis.services import AnalysisGuardService
 
 from .models import Content
 from .storage import S3StorageService
+
+logger = logging.getLogger(__name__)
 
 
 class ContentRegistrationService:
@@ -24,7 +26,21 @@ class ContentRegistrationService:
             file_size=upload.size,
         )
 
-        source_url = cls._build_source_url(content)
+        logger.info(
+            "contents.register.created content_id=%s owner_id=%s file=%s mime=%s size=%s",
+            content.public_id,
+            content.owner_id,
+            content.original_filename,
+            content.mime_type,
+            content.file_size,
+        )
+
+        source_input = cls._build_source_input(content)
+        logger.info(
+            "contents.register.source_input content_id=%s source_input=%s",
+            content.public_id,
+            source_input,
+        )
 
         guard_request = GuardRequestV1(
             job_id=str(content.public_id),
@@ -32,7 +48,7 @@ class ContentRegistrationService:
             content_type="image",
             input=[
                 {
-                    "url": source_url,
+                    **source_input,
                     "filename": content.original_filename,
                     "mime_type": content.mime_type,
                 }
@@ -44,7 +60,22 @@ class ContentRegistrationService:
             options={},
         )
 
+        logger.info(
+            "contents.register.guard_request content_id=%s payload=%s",
+            content.public_id,
+            guard_request.model_dump(exclude_none=True),
+        )
+
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
+        logger.info(
+            "contents.register.guard_response content_id=%s decision=%s reason=%s top_cosine=%s top_phash=%s top_match=%s",
+            content.public_id,
+            response.decision,
+            response.reason,
+            response.scores.top_cosine,
+            response.scores.top_phash_dist,
+            response.top_match.model_dump() if response.top_match else None,
+        )
 
         content.status = response.decision
         content.decision = response.decision
@@ -75,15 +106,19 @@ class ContentRegistrationService:
         )
         return content
 
-    @staticmethod
-    def _build_file_url(path: str) -> str:
-        resolved = Path(path).resolve().as_posix()
-        return f"file://{quote(resolved)}"
-
     @classmethod
-    def _build_source_url(cls, content: Content) -> str:
+    def _build_source_input(cls, content: Content) -> dict[str, str]:
         if not S3StorageService.is_enabled():
-            return cls._build_file_url(content.original_file.path)
+            resolved_path = str(Path(content.original_file.path).resolve())
+            logger.info(
+                "contents.register.source_mode content_id=%s mode=local path=%s",
+                content.public_id,
+                resolved_path,
+            )
+            return {
+                # Same-runtime function call integration can pass an actual local path.
+                "url": resolved_path,
+            }
 
         key = S3StorageService.build_content_key(
             owner_id=content.owner_id,
@@ -96,6 +131,16 @@ class ContentRegistrationService:
             key=key,
             content_type=content.mime_type,
         )
+        logger.info(
+            "contents.register.source_mode content_id=%s mode=s3 key=%s bucket=%s",
+            content.public_id,
+            key,
+            settings.AWS_STORAGE_BUCKET_NAME,
+        )
         content.original_storage_key = key
         content.save(update_fields=["original_storage_key", "updated_at"])
-        return S3StorageService.generate_presigned_get_url(key=key)
+        return {
+            "url": S3StorageService.generate_presigned_get_url(key=key),
+            "s3_key": key,
+            "s3_uri": S3StorageService.build_s3_uri(key=key),
+        }

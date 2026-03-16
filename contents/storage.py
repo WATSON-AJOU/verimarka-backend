@@ -43,6 +43,10 @@ class S3StorageService:
         )
 
     @classmethod
+    def build_s3_uri(cls, *, key: str) -> str:
+        return f"s3://{settings.AWS_STORAGE_BUCKET_NAME}/{key}"
+
+    @classmethod
     def build_content_key(
         cls,
         *,
