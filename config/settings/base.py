@@ -102,6 +102,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/static/"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
@@ -131,3 +133,22 @@ KAKAO_CLIENT_SECRET = env("KAKAO_CLIENT_SECRET", default="")
 SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
 SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")
 SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
+
+AI_MODEL_ROOT = env(
+    "AI_MODEL_ROOT",
+    default=str(BASE_DIR / "aimodel" / "img_guard"),
+)
+
+AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default="")
+AWS_DEFAULT_REGION = env("AWS_DEFAULT_REGION", default="")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default="")
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="")
+AWS_S3_USE_SSL = env.bool("AWS_S3_USE_SSL", default=True)
+AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="virtual")
+AWS_QUERYSTRING_EXPIRE = env.int("AWS_QUERYSTRING_EXPIRE", default=3600)
+CONTENT_ORIGINAL_PREFIX = env("CONTENT_ORIGINAL_PREFIX", default="original")
+CONTENT_CANDIDATE_PREFIX = env("CONTENT_CANDIDATE_PREFIX", default="candidate")
+CONTENT_RESULT_PREFIX = env("CONTENT_RESULT_PREFIX", default="result")
