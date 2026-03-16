@@ -1,11 +1,12 @@
 from django.urls import path
-from .views import MeView
-from .views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
-from .views_sms import PhoneSendCodeView, PhoneVerifyCodeView
-from .views_auth import SignupView, LoginView
+from .views.views import MeView, NicknameAvailabilityView
+from .views.views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
+from .views.views_sms import PhoneSendCodeView, PhoneVerifyCodeView
+from .views.views_auth import SignupView, LoginView
 
 urlpatterns = [
     path("me/", MeView.as_view(), name="me"),
+    path("nickname-availability/", NicknameAvailabilityView.as_view(), name="nickname_availability"),
     path("auth/oauth/google/", GoogleOAuthLoginView.as_view(), name="oauth_google"),
     path("auth/oauth/kakao/", KakaoOAuthLoginView.as_view(), name="oauth_kakao"),
     path("phone/send-code/", PhoneSendCodeView.as_view(), name="phone_send_code"),
