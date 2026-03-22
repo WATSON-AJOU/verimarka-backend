@@ -155,8 +155,11 @@ SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
 SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")
 SOLAPI_SENDER = env("SOLAPI_SENDER", default="")
 REDIS_URL = env("REDIS_URL", default="")
-AWS_SES_REGION = env("AWS_SES_REGION", default="")
-AWS_SES_SENDER_EMAIL = env("AWS_SES_SENDER_EMAIL", default="")
+AWS_SES_REGION = env("AWS_SES_REGION", default=env("AWS_REGION", default=""))
+AWS_SES_SENDER_EMAIL = env(
+    "AWS_SES_SENDER_EMAIL",
+    default=env("SES_FROM_EMAIL", default=""),
+)
 
 AI_MODEL_ROOT = env(
     "AI_MODEL_ROOT",
