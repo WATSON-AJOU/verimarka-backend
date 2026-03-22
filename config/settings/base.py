@@ -164,6 +164,12 @@ AI_MODEL_ROOT = env(
     "AI_MODEL_ROOT",
     default=_default_ai_model_root(BASE_DIR),
 )
+BLOCKCHAIN_INTEGRATION_ROOT = env(
+    "BLOCKCHAIN_INTEGRATION_ROOT",
+    default=str(BASE_DIR.parent / "Blockchain" / "backend_integration"),
+)
+VERIMARKA_PUBLIC_BASE_URL = env("VERIMARKA_PUBLIC_BASE_URL", default="https://verimarka.com")
+WATSON_RECIPIENT_ADDRESS = env("WATSON_RECIPIENT_ADDRESS", default="")
 
 AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)
 AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")

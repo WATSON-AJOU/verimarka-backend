@@ -45,6 +45,7 @@ class Content(models.Model):
     top_match = models.JSONField(default=dict, blank=True)
     candidates = models.JSONField(default=list, blank=True)
     watermark = models.JSONField(default=dict, blank=True)
+    blockchain = models.JSONField(default=dict, blank=True)
     timing_ms = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

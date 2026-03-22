@@ -7,6 +7,7 @@ from .storage import S3StorageService
 class ContentSerializer(serializers.ModelSerializer):
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     file_url = serializers.SerializerMethodField()
+    watermark_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Content
@@ -21,6 +22,7 @@ class ContentSerializer(serializers.ModelSerializer):
             "mime_type",
             "file_size",
             "file_url",
+            "watermark_file_url",
             "decision",
             "reason",
             "next_action",
@@ -29,6 +31,7 @@ class ContentSerializer(serializers.ModelSerializer):
             "top_match",
             "candidates",
             "watermark",
+            "blockchain",
             "timing_ms",
             "created_at",
             "updated_at",
@@ -45,6 +48,23 @@ class ContentSerializer(serializers.ModelSerializer):
             return None
         url = obj.original_file.url
         return request.build_absolute_uri(url) if request else url
+
+    def get_watermark_file_url(self, obj):
+        watermark = obj.watermark or {}
+        output_key = watermark.get("output_key")
+        output_url = watermark.get("output_url")
+
+        if output_key and S3StorageService.is_enabled():
+            return S3StorageService.generate_presigned_get_url(key=output_key)
+
+        if not output_url:
+            return None
+
+        if output_url.startswith("http://") or output_url.startswith("https://"):
+            return output_url
+
+        request = self.context.get("request")
+        return request.build_absolute_uri(output_url) if request else output_url
 
 
 class ContentRegisterSerializer(serializers.Serializer):
