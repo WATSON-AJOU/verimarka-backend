@@ -4,12 +4,22 @@ services:
     build:
       context: ..
       dockerfile: verimarka-BACKEND/Dockerfile
+    depends_on:
+      - redis
     env_file:
       - .env.prod
     environment:
       AI_MODEL_ROOT: /app/WATSON_WM/img_guard
     expose:
       - "8000"
+    restart: unless-stopped
+
+  redis:
+    container_name: verimarka-redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
   verimarka-nginx:
@@ -40,3 +50,6 @@ services:
          sleep 12h;
        done"
     restart: unless-stopped
+
+volumes:
+  redis_data:

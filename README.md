@@ -49,3 +49,9 @@ pip freeze > requirements.txt
 	•	logs : 판정 로그, 액션 로그, 분쟁 대응 로그
 	•	common : 공통 base model, enum, validator, util
 ```
+
+redis 로컬
+```
+docker run -d --name verimarka-redis -p 6379:6379 redis:7-alpine
+redis-cli ping
+```

@@ -15,6 +15,7 @@ class MeSerializer(serializers.ModelSerializer):
             "nickname",
             "display_name",
             "email",
+            "email_verified",
             "phone",
             "phone_verified",
             "auth_provider",
@@ -29,7 +30,7 @@ class MeSerializer(serializers.ModelSerializer):
 class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("username", "nickname", "display_name")
+        fields = ("username", "nickname", "display_name", "email")
 
     def validate_nickname(self, value):
         nickname = (value or "").strip()
@@ -42,6 +43,35 @@ class MeUpdateSerializer(serializers.ModelSerializer):
 
         return nickname
 
+    def validate_email(self, value):
+        email = (value or "").strip().lower()
+        if not email:
+            raise serializers.ValidationError("이메일은 비워둘 수 없습니다.")
+
+        queryset = User.objects.filter(email=email).exclude(id=self.instance.id)
+        if queryset.exists():
+            raise serializers.ValidationError("이미 사용 중인 이메일입니다.")
+
+        return email
+
+    def update(self, instance, validated_data):
+        next_email = validated_data.get("email")
+        email_changed = next_email is not None and next_email != instance.email
+
+        if email_changed:
+            instance.email_verified = False
+            instance.email_verified_at = None
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        update_fields = list(validated_data.keys())
+        if email_changed:
+            update_fields.extend(["email_verified", "email_verified_at"])
+
+        instance.save(update_fields=update_fields)
+        return instance
+
 
 class PhoneSendSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
@@ -49,6 +79,15 @@ class PhoneSendSerializer(serializers.Serializer):
 
 class PhoneVerifySerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
+    code = serializers.CharField(max_length=6)
+
+
+class EmailSendSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class EmailVerifySerializer(serializers.Serializer):
+    email = serializers.EmailField()
     code = serializers.CharField(max_length=6)
 
 

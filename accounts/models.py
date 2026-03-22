@@ -15,6 +15,8 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, blank=True, null=True, unique=True)
     phone_verified = models.BooleanField(default=False)
     phone_verified_at = models.DateTimeField(null=True, blank=True)
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
 
     nickname = models.CharField(max_length=30, unique=True)
     display_name = models.CharField(max_length=50, blank=True)
@@ -44,6 +46,8 @@ class User(AbstractUser):
         self.deleted_at = deleted_at
         self.phone_verified = False
         self.phone_verified_at = None
+        self.email_verified = False
+        self.email_verified_at = None
         self.phone = None
         self.profile_image = None
         self.display_name = "탈퇴한 회원"
@@ -60,6 +64,8 @@ class User(AbstractUser):
                 "deleted_at",
                 "phone_verified",
                 "phone_verified_at",
+                "email_verified",
+                "email_verified_at",
                 "phone",
                 "profile_image",
                 "display_name",
