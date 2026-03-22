@@ -7,3 +7,5 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.env.dev
+.env.prod
