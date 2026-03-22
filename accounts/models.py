@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
+from uuid import uuid4
 
 
 class User(AbstractUser):
@@ -28,9 +29,48 @@ class User(AbstractUser):
 
     terms_agreed_at = models.DateTimeField(null=True, blank=True)
     privacy_agreed_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.email or self.username
+
+    def soft_delete(self):
+        deleted_at = timezone.now()
+        deleted_suffix = f"deleted_{self.pk}_{uuid4().hex[:8]}"
+
+        self.is_active = False
+        self.is_deleted = True
+        self.deleted_at = deleted_at
+        self.phone_verified = False
+        self.phone_verified_at = None
+        self.phone = None
+        self.profile_image = None
+        self.display_name = "탈퇴한 회원"
+        self.email = ""
+        self.username = deleted_suffix[:150]
+        self.nickname = deleted_suffix[:30]
+        self.auth_provider = "local"
+        self.is_profile_completed = False
+        self.set_unusable_password()
+        self.save(
+            update_fields=[
+                "is_active",
+                "is_deleted",
+                "deleted_at",
+                "phone_verified",
+                "phone_verified_at",
+                "phone",
+                "profile_image",
+                "display_name",
+                "email",
+                "username",
+                "nickname",
+                "auth_provider",
+                "is_profile_completed",
+                "password",
+            ]
+        )
 
 
 class SocialAccount(models.Model):

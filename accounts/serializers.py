@@ -108,6 +108,11 @@ class LoginSerializer(serializers.Serializer):
                 "이메일 또는 비밀번호가 올바르지 않습니다."
             )
 
+        if user.is_deleted or not user.is_active:
+            raise serializers.ValidationError(
+                "탈퇴한 계정입니다. 고객센터로 문의해주세요."
+            )
+
         auth_user = authenticate(username=user.username, password=password)
         if not auth_user:
             raise serializers.ValidationError(

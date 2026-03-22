@@ -99,6 +99,11 @@ class GoogleOAuthLoginView(APIView):
 
                 if social:
                     user = social.user
+                    if user.is_deleted or not user.is_active:
+                        return Response(
+                            {"detail": "탈퇴한 계정입니다. 고객센터로 문의해주세요."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
                     created = False
                 else:
                     if email and User.objects.filter(email=email).exists():
@@ -203,6 +208,11 @@ class KakaoOAuthLoginView(APIView):
 
                 if social:
                     user = social.user
+                    if user.is_deleted or not user.is_active:
+                        return Response(
+                            {"detail": "탈퇴한 계정입니다. 고객센터로 문의해주세요."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
                     created = False
                 else:
                     if email and User.objects.filter(email=email).exists():

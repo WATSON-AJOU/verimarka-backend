@@ -25,6 +25,17 @@ class MeView(APIView):
         return Response(MeSerializer(request.user).data, status=status.HTTP_200_OK)
 
 
+class WithdrawView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        request.user.soft_delete()
+        return Response(
+            {"message": "회원 탈퇴가 완료되었습니다."},
+            status=status.HTTP_200_OK,
+        )
+
+
 class NicknameAvailabilityView(APIView):
     permission_classes = [AllowAny]
 
