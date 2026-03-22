@@ -81,3 +81,19 @@ class ContentRegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
 
         return value
+
+
+class ContentVerifySerializer(serializers.Serializer):
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        mime_type = (getattr(value, "content_type", "") or "").lower()
+        allowed_types = {"image/png", "image/jpeg"}
+        if mime_type not in allowed_types:
+            raise serializers.ValidationError("JPG 또는 PNG 파일만 업로드할 수 있습니다.")
+
+        max_bytes = 20 * 1024 * 1024
+        if value.size > max_bytes:
+            raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
+
+        return value

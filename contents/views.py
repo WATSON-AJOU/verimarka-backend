@@ -10,10 +10,11 @@ from rest_framework.views import APIView
 from analysis.services import AIIntegrationError
 from accounts.permissions import IsPhoneVerified
 
-from .serializers import ContentRegisterSerializer, ContentSerializer
+from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
 from .services import ContentRegistrationService
 from .models import Content
 from .blockchain_service import ContentBlockchainService
+from .verification_service import ContentVerificationService
 from .watermark_service import ContentWatermarkService
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,42 @@ class ContentRegisterView(APIView):
             ContentSerializer(content, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class ContentVerifyView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticated, IsPhoneVerified]
+
+    def post(self, request):
+        serializer = ContentVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        upload = serializer.validated_data["file"]
+
+        logger.info(
+            "contents.verify.request user_id=%s filename=%s size=%s content_type=%s",
+            getattr(request.user, "id", None),
+            getattr(upload, "name", None),
+            getattr(upload, "size", None),
+            getattr(upload, "content_type", None),
+        )
+
+        try:
+            result = ContentVerificationService.verify_image(user=request.user, upload=upload)
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.verify.ai_error user_id=%s error_code=%s message=%s",
+                getattr(request.user, "id", None),
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        logger.info(
+            "contents.verify.success user_id=%s outcome=%s",
+            getattr(request.user, "id", None),
+            result.get("outcome"),
+        )
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class ContentWatermarkView(APIView):
