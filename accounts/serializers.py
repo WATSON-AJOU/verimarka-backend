@@ -104,6 +104,8 @@ class SignupSerializer(serializers.ModelSerializer):
         username = (value or "").strip()
         if not username:
             raise serializers.ValidationError("이름은 비워둘 수 없습니다.")
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
         return username
 
     def validate_email(self, value):
@@ -111,6 +113,20 @@ class SignupSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=email).exists():
             raise serializers.ValidationError("이미 사용 중인 이메일입니다.")
         return email
+
+    def validate_password(self, value):
+        import re
+
+        password = value or ""
+        if not re.search(r"[a-z]", password):
+            raise serializers.ValidationError("비밀번호는 소문자를 포함해야 합니다.")
+        if not re.search(r"[A-Z]", password):
+            raise serializers.ValidationError("비밀번호는 대문자를 포함해야 합니다.")
+        if not re.search(r"\d", password):
+            raise serializers.ValidationError("비밀번호는 숫자를 포함해야 합니다.")
+        if not re.search(r"[^A-Za-z0-9]", password):
+            raise serializers.ValidationError("비밀번호는 특수문자를 포함해야 합니다.")
+        return password
 
     def validate(self, attrs):
         if not attrs.get("terms_agreed"):
