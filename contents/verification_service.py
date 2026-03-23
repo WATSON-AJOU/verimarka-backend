@@ -143,8 +143,8 @@ class ContentVerificationService:
         )
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
 
+        selected_match, candidate_content = cls._select_display_candidate(response)
         top_match = response.top_match.model_dump() if response.top_match else {}
-        candidate_content = ContentRegistrationService._find_content_by_db_key(top_match.get("db_key") or "")
 
         candidate_preview_url = cls._resolve_content_image_url(candidate_content)
         candidate_owner = None
@@ -179,15 +179,43 @@ class ContentVerificationService:
             },
             "candidate": {
                 "preview_url": candidate_preview_url,
-                "file_name": candidate_file_name or top_match.get("db_file"),
+                "file_name": candidate_file_name or selected_match.get("db_file") or top_match.get("db_file"),
                 "owner_name": candidate_owner or "artist@verimarka.com",
                 "registered_at": candidate_registered_at or "2026.03.18 16:05",
-                "cosine": response.scores.top_cosine,
-                "phash_dist": response.scores.top_phash_dist,
+                "cosine": selected_match.get("cosine", response.scores.top_cosine),
+                "phash_dist": selected_match.get("phash_dist", response.scores.top_phash_dist),
                 "threshold": 8,
-                "summary": "서비스 DB 유사 이미지 후보 1건 발견" if response.top_match else "유사 이미지 후보를 찾지 못했습니다.",
+                "summary": (
+                    "서비스 DB 유사 이미지 후보 1건 발견"
+                    if candidate_content or response.top_match
+                    else "유사 이미지 후보를 찾지 못했습니다."
+                ),
             },
         }
+
+    @classmethod
+    def _select_display_candidate(cls, response) -> tuple[dict, Content | None]:
+        matches: list[dict] = []
+
+        if response.top_match:
+            matches.append(response.top_match.model_dump())
+        matches.extend(candidate.model_dump() for candidate in response.candidates)
+
+        seen_keys: set[str] = set()
+        for match in matches:
+            db_key = match.get("db_key") or ""
+            if db_key in seen_keys:
+                continue
+            if db_key:
+                seen_keys.add(db_key)
+
+            candidate_content = ContentRegistrationService._find_content_by_db_key(db_key)
+            if candidate_content:
+                return match, candidate_content
+
+        if response.top_match:
+            return response.top_match.model_dump(), None
+        return {}, None
 
     @classmethod
     def _write_temp_file(cls, upload) -> Path:
