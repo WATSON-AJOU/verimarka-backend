@@ -11,6 +11,9 @@ services:
     environment:
       AI_MODEL_ROOT: /app/WATSON_WM/img_guard
       BLOCKCHAIN_INTEGRATION_ROOT: /app/Blockchain/backend_integration
+      WAM_REPO_DIR: /app/WATSON_WM/img_guard/third_party/watermark-anything
+      WAM_PARAMS_PATH: /app/WATSON_WM/img_guard/third_party/watermark-anything/checkpoints/params.json
+      WAM_CHECKPOINT_PATH: /app/WATSON_WM/img_guard/models/wam/wam_mit.pth
     expose:
       - "8000"
     restart: unless-stopped
