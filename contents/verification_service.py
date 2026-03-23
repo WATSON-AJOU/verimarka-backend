@@ -1,3 +1,4 @@
+import logging
 import tempfile
 import zlib
 from pathlib import Path
@@ -14,6 +15,8 @@ from .models import Content
 from .services import ContentRegistrationService
 from .storage import S3StorageService
 
+logger = logging.getLogger(__name__)
+
 
 class ContentVerificationService:
     @classmethod
@@ -21,9 +24,20 @@ class ContentVerificationService:
         temp_path = cls._write_temp_file(upload)
         try:
             source_input = cls._build_source_input(temp_path=temp_path, upload=upload)
+            verify_job_id = f"verify-{timezone.now().timestamp()}"
+            logger.info(
+                "contents.verify.detect_request user_id=%s job_id=%s source_input=%s",
+                getattr(user, "id", None),
+                verify_job_id,
+                {
+                    **source_input,
+                    "filename": upload.name,
+                    "mime_type": getattr(upload, "content_type", "") or "application/octet-stream",
+                },
+            )
             detect_response = WatermarkAIService.detect(
                 {
-                    "job_id": f"verify-{timezone.now().timestamp()}",
+                    "job_id": verify_job_id,
                     "input": {
                         **source_input,
                         "filename": upload.name,
@@ -37,6 +51,17 @@ class ContentVerificationService:
             )
 
             detect_result = detect_response.get("result", {})
+            logger.info(
+                "contents.verify.detect_response user_id=%s job_id=%s success=%s detected=%s payload_id=%s confidence=%s bit_accuracy=%s reason=%s",
+                getattr(user, "id", None),
+                verify_job_id,
+                detect_response.get("success"),
+                detect_result.get("detected"),
+                detect_result.get("payload_id"),
+                detect_result.get("confidence"),
+                detect_result.get("bit_accuracy"),
+                detect_response.get("reason"),
+            )
             if detect_response.get("success") and detect_result.get("detected"):
                 verified_payload = cls._build_verified_result(
                     user=user,
@@ -45,8 +70,27 @@ class ContentVerificationService:
                     detect_result=detect_result,
                 )
                 if verified_payload:
+                    logger.info(
+                        "contents.verify.detect_verified user_id=%s job_id=%s token_id=%s verification_link=%s",
+                        getattr(user, "id", None),
+                        verify_job_id,
+                        ((verified_payload.get("blockchain") or {}).get("token_id")),
+                        ((verified_payload.get("blockchain") or {}).get("verification_link")),
+                    )
                     return verified_payload
+                logger.info(
+                    "contents.verify.detect_unresolved user_id=%s job_id=%s payload_id=%s",
+                    getattr(user, "id", None),
+                    verify_job_id,
+                    detect_result.get("payload_id"),
+                )
 
+            logger.info(
+                "contents.verify.fallback_start user_id=%s job_id=%s reason=%s",
+                getattr(user, "id", None),
+                verify_job_id,
+                "watermark_not_detected_or_not_resolved",
+            )
             return cls._build_candidate_result(user=user, upload=upload, source_input=source_input)
         finally:
             try:
@@ -124,8 +168,9 @@ class ContentVerificationService:
 
     @classmethod
     def _build_candidate_result(cls, *, user, upload, source_input: dict) -> dict:
+        fallback_job_id = f"verify-fallback-{timezone.now().timestamp()}"
         guard_request = GuardRequestV1(
-            job_id=f"verify-fallback-{timezone.now().timestamp()}",
+            job_id=fallback_job_id,
             mode="register",
             content_type="image",
             input=[
@@ -140,6 +185,12 @@ class ContentVerificationService:
                 "verify_filename": upload.name,
             },
             options={},
+        )
+        logger.info(
+            "contents.verify.fallback_guard_request user_id=%s job_id=%s payload=%s",
+            getattr(user, "id", None),
+            fallback_job_id,
+            guard_request.model_dump(exclude_none=True),
         )
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
 
@@ -157,6 +208,16 @@ class ContentVerificationService:
             )
             candidate_registered_at = timezone.localtime(candidate_content.created_at).strftime("%Y.%m.%d %H:%M")
             candidate_file_name = candidate_content.original_filename
+
+        logger.info(
+            "contents.verify.fallback_guard_response user_id=%s job_id=%s decision=%s top_match=%s selected_match=%s preview_url=%s",
+            getattr(user, "id", None),
+            fallback_job_id,
+            response.decision,
+            response.top_match.model_dump() if response.top_match else None,
+            selected_match,
+            candidate_preview_url,
+        )
 
         return {
             "outcome": "candidate",
@@ -236,6 +297,11 @@ class ContentVerificationService:
             local_path=str(temp_path),
             key=key,
             content_type=getattr(upload, "content_type", "") or "application/octet-stream",
+        )
+        logger.info(
+            "contents.verify.source_mode mode=s3 key=%s bucket=%s",
+            key,
+            settings.AWS_STORAGE_BUCKET_NAME,
         )
         return {
             "url": S3StorageService.generate_presigned_get_url(key=key),

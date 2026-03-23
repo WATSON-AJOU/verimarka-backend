@@ -144,6 +144,36 @@ class ContentBlockchainService:
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
         token_uri = cls._build_token_uri(content)
+        file_hash_hex = f"0x{file_hash_bytes.hex()}"
+
+        try:
+            file_hash_used = blockchain.is_file_hash_used(file_hash_bytes)
+        except Exception as exc:
+            logger.warning(
+                "contents.blockchain.review_vote_hash_check_failed content_id=%s wm_id=%s error=%s",
+                content.public_id,
+                wm_id,
+                exc,
+            )
+            file_hash_used = False
+
+        logger.info(
+            "contents.blockchain.review_vote_start_prepare content_id=%s wm_id=%s file_hash=%s file_hash_used=%s token_uri=%s",
+            content.public_id,
+            wm_id,
+            file_hash_hex,
+            file_hash_used,
+            token_uri,
+        )
+
+        if file_hash_used:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_ALREADY_REGISTERED",
+                error_message="이미 등록된 파일 해시라서 커뮤니티 검증 투표를 새로 생성할 수 없습니다.",
+                retryable=False,
+                status_code=409,
+                job_id=str(content.public_id),
+            )
 
         try:
             receipt = blockchain.mint_document(

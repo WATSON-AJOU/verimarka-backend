@@ -109,7 +109,7 @@ class ContentWatermarkService:
                 owner_id=content.owner_id,
                 content_public_id=str(content.public_id),
                 filename=content.original_filename,
-                stage=settings.CONTENT_CANDIDATE_PREFIX,
+                stage=settings.CONTENT_ORIGINAL_PREFIX,
             )
             S3StorageService.upload_file(
                 local_path=content.original_file.path,
