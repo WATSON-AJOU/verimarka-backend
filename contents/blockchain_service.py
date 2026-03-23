@@ -1,4 +1,7 @@
 import importlib.util
+import importlib
+import logging
+import sys
 import zlib
 from datetime import datetime
 from pathlib import Path
@@ -13,8 +16,12 @@ from .models import Content
 from .storage import S3StorageService
 
 
+logger = logging.getLogger(__name__)
+
+
 class ContentBlockchainService:
     _blockchain_class = None
+    _vector_upsert_callable = None
     REVIEW_THRESHOLD = 0.75
 
     NETWORK_NAME_BY_CHAIN_ID = {
@@ -50,6 +57,10 @@ class ContentBlockchainService:
             and existing_blockchain.get("minted")
             and existing_blockchain.get("tx_hash")
         ):
+            previous_blockchain = cls._json_safe(existing_blockchain)
+            content = cls._ensure_vector_upserted(content=content)
+            if content.blockchain != previous_blockchain:
+                content.save(update_fields=["blockchain", "updated_at"])
             return content
 
         blockchain = cls._create_client()
@@ -108,6 +119,7 @@ class ContentBlockchainService:
             "model_version": watermark.get("model_version") or "v2.1.0",
             "document": cls._json_safe(token_info or {}),
         }
+        content = cls._ensure_vector_upserted(content=content)
         content.save(update_fields=["blockchain", "updated_at"])
         return content
 
@@ -316,6 +328,137 @@ class ContentBlockchainService:
         spec.loader.exec_module(module)
         cls._blockchain_class = module.WatsonBlockchain
         return cls._blockchain_class
+
+    @classmethod
+    def _ensure_vector_upserted(cls, *, content: Content) -> Content:
+        blockchain_data = content.blockchain or {}
+        vector_upsert = blockchain_data.get("vector_upsert") or {}
+        if vector_upsert.get("success"):
+            return content
+
+        try:
+            response = cls._upsert_watermarked_vector(content=content)
+        except AIIntegrationError as exc:
+            logger.warning(
+                "contents.blockchain.vector_upsert_failed content_id=%s error_code=%s message=%s",
+                content.public_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            response = {
+                "success": False,
+                "reason": exc.error_message,
+                "error_code": exc.error_code,
+            }
+
+        content.blockchain = {
+            **blockchain_data,
+            "vector_upsert": {
+                **cls._json_safe(response),
+                "updated_at": timezone.now().isoformat(),
+            },
+        }
+        return content
+
+    @classmethod
+    def _upsert_watermarked_vector(cls, *, content: Content) -> dict[str, Any]:
+        watermark = content.watermark or {}
+        output_key = watermark.get("output_key")
+        output_path = watermark.get("output_path")
+        output_url = watermark.get("output_url")
+
+        input_payload: dict[str, Any] = {
+            "filename": content.original_filename,
+            "mime_type": content.mime_type,
+        }
+        if output_key:
+            input_payload["s3_key"] = output_key
+            if S3StorageService.is_enabled():
+                input_payload["s3_uri"] = S3StorageService.build_s3_uri(key=output_key)
+                input_payload["url"] = S3StorageService.generate_presigned_get_url(key=output_key)
+        elif output_path and Path(output_path).exists():
+            input_payload["local_path"] = output_path
+        elif output_url:
+            input_payload["url"] = output_url
+        else:
+            raise AIIntegrationError(
+                error_code="VECTOR_UPSERT_INPUT_MISSING",
+                error_message="워터마크 결과 이미지를 찾을 수 없어 검색 인덱스에 반영할 수 없습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
+
+        try:
+            response = cls._get_vector_upsert_callable()(
+                {
+                    "job_id": f"mint-upsert-{content.public_id}",
+                    "input": input_payload,
+                    "s3_key": output_key,
+                    "asset_url": input_payload.get("url"),
+                    "file_name": content.original_filename,
+                }
+            )
+        except Exception as exc:
+            raise AIIntegrationError(
+                error_code="VECTOR_UPSERT_FAIL",
+                error_message=str(exc) or "pgvector upsert에 실패했습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            ) from exc
+
+        payload = response.model_dump() if hasattr(response, "model_dump") else response
+        if not payload.get("success"):
+            raise AIIntegrationError(
+                error_code="VECTOR_UPSERT_FAIL",
+                error_message=payload.get("reason") or "pgvector upsert에 실패했습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
+        return payload
+
+    @classmethod
+    def _get_vector_upsert_callable(cls):
+        if cls._vector_upsert_callable is not None:
+            return cls._vector_upsert_callable
+
+        cls._ensure_aimodel_path()
+
+        try:
+            module = importlib.import_module("app.persist_service")
+            cls._vector_upsert_callable = module.upsert_vector_embedding_v1
+            return cls._vector_upsert_callable
+        except ModuleNotFoundError as exc:
+            raise AIIntegrationError(
+                error_code="AI_DEPENDENCY_MISSING",
+                error_message=str(exc),
+                retryable=False,
+                status_code=500,
+            ) from exc
+
+    @classmethod
+    def _ensure_aimodel_path(cls):
+        aimodel_root = Path(
+            getattr(
+                settings,
+                "AI_MODEL_ROOT",
+                Path(settings.BASE_DIR).parent / "WATSON_WM" / "img_guard",
+            )
+        ).resolve()
+
+        if not aimodel_root.exists():
+            raise AIIntegrationError(
+                error_code="AI_MODULE_NOT_FOUND",
+                error_message=f"img_guard module not found: {aimodel_root}",
+                retryable=False,
+                status_code=500,
+            )
+
+        aimodel_root_str = str(aimodel_root)
+        if aimodel_root_str not in sys.path:
+            sys.path.insert(0, aimodel_root_str)
 
     @classmethod
     def _resolve_recipient_address(cls, blockchain) -> str:
