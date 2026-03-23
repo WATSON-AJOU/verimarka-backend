@@ -1,5 +1,4 @@
 import importlib.util
-import importlib
 import logging
 import sys
 import zlib
@@ -424,12 +423,29 @@ class ContentBlockchainService:
         if cls._vector_upsert_callable is not None:
             return cls._vector_upsert_callable
 
-        cls._ensure_aimodel_path()
+        aimodel_root = cls._ensure_aimodel_path()
+        persist_path = aimodel_root / "app" / "persist_service.py"
+
+        if not persist_path.exists():
+            raise AIIntegrationError(
+                error_code="AI_MODULE_NOT_FOUND",
+                error_message=f"persist_service module not found: {persist_path}",
+                retryable=False,
+                status_code=500,
+            )
+
+        spec = importlib.util.spec_from_file_location("verimarka_persist_module", persist_path)
+        if spec is None or spec.loader is None:
+            raise AIIntegrationError(
+                error_code="AI_MODULE_LOAD_FAIL",
+                error_message=f"unable to load persist_service module: {persist_path}",
+                retryable=False,
+                status_code=500,
+            )
 
         try:
-            module = importlib.import_module("app.persist_service")
-            cls._vector_upsert_callable = module.upsert_vector_embedding_v1
-            return cls._vector_upsert_callable
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
         except ModuleNotFoundError as exc:
             raise AIIntegrationError(
                 error_code="AI_DEPENDENCY_MISSING",
@@ -437,6 +453,9 @@ class ContentBlockchainService:
                 retryable=False,
                 status_code=500,
             ) from exc
+
+        cls._vector_upsert_callable = module.upsert_vector_embedding_v1
+        return cls._vector_upsert_callable
 
     @classmethod
     def _ensure_aimodel_path(cls):
@@ -459,6 +478,7 @@ class ContentBlockchainService:
         aimodel_root_str = str(aimodel_root)
         if aimodel_root_str not in sys.path:
             sys.path.insert(0, aimodel_root_str)
+        return aimodel_root
 
     @classmethod
     def _resolve_recipient_address(cls, blockchain) -> str:
