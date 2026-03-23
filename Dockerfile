@@ -24,10 +24,12 @@ RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt \
 
 COPY verimarka-BACKEND /app/verimarka-BACKEND
 COPY WATSON_WM /app/WATSON_WM
+COPY Blockchain /app/Blockchain
 
 WORKDIR /app/verimarka-BACKEND
 
-ENV AI_MODEL_ROOT=/app/WATSON_WM/img_guard
+ENV AI_MODEL_ROOT=/app/WATSON_WM/img_guard \
+    BLOCKCHAIN_INTEGRATION_ROOT=/app/Blockchain/backend_integration
 
 RUN chmod +x /app/verimarka-BACKEND/entrypoint.sh
 
