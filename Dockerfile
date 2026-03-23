@@ -17,8 +17,10 @@ RUN apt-get update \
 COPY verimarka-BACKEND/requirements.txt /tmp/backend-requirements.txt
 COPY WATSON_WM/img_guard/requirements.txt /tmp/img_guard/requirements.txt
 COPY WATSON_WM/img_guard/requirements.cpu.txt /tmp/img_guard/requirements.cpu.txt
+COPY WATSON_WM/img_guard/third_party/watermark-anything/requirements.txt /tmp/watermark-anything/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt \
-    && pip install --no-cache-dir -r /tmp/img_guard/requirements.cpu.txt
+    && pip install --no-cache-dir -r /tmp/img_guard/requirements.cpu.txt \
+    && pip install --no-cache-dir -r /tmp/watermark-anything/requirements.txt
 
 COPY verimarka-BACKEND /app/verimarka-BACKEND
 COPY WATSON_WM /app/WATSON_WM
