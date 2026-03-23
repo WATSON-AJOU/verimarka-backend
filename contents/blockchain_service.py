@@ -1,6 +1,6 @@
 import importlib.util
 import zlib
-from io import BytesIO
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from .storage import S3StorageService
 
 class ContentBlockchainService:
     _blockchain_class = None
+    REVIEW_THRESHOLD = 0.75
 
     NETWORK_NAME_BY_CHAIN_ID = {
         11155111: "Sepolia",
@@ -44,7 +45,11 @@ class ContentBlockchainService:
             )
 
         existing_blockchain = content.blockchain or {}
-        if existing_blockchain.get("minted") and existing_blockchain.get("tx_hash"):
+        if (
+            existing_blockchain.get("mint_kind") == "content"
+            and existing_blockchain.get("minted")
+            and existing_blockchain.get("tx_hash")
+        ):
             return content
 
         blockchain = cls._create_client()
@@ -82,6 +87,7 @@ class ContentBlockchainService:
         content.blockchain = {
             **existing_blockchain,
             "minted": True,
+            "mint_kind": "content",
             "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
@@ -103,6 +109,163 @@ class ContentBlockchainService:
             "document": token_info or {},
         }
         content.save(update_fields=["blockchain", "updated_at"])
+        return content
+
+    @classmethod
+    def start_review_vote(cls, *, content: Content) -> Content:
+        if content.decision != "review":
+            raise AIIntegrationError(
+                error_code="INVALID_STATE",
+                error_message="REVIEW 판정 콘텐츠만 커뮤니티 검증을 시작할 수 있습니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            )
+
+        existing_blockchain = content.blockchain or {}
+        existing_vote = existing_blockchain.get("vote") or {}
+        if existing_blockchain.get("mint_kind") == "review_vote" and existing_blockchain.get("token_id"):
+            return cls.sync_review_vote(content=content)
+
+        blockchain = cls._create_client()
+        recipient_address = cls._resolve_recipient_address(blockchain)
+        file_bytes = cls._load_original_bytes(content)
+        file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
+        wm_id = cls._resolve_wm_id(content)
+        token_uri = cls._build_token_uri(content)
+
+        try:
+            receipt = blockchain.mint_document(
+                to=recipient_address,
+                wm_id=wm_id,
+                file_hash=file_hash_bytes,
+                token_uri=token_uri,
+                is_suspicious=True,
+            )
+        except Exception as exc:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_START_FAIL",
+                error_message=str(exc) or "커뮤니티 검증 투표 생성에 실패했습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            ) from exc
+
+        content.blockchain = {
+            **existing_blockchain,
+            "minted": True,
+            "mint_kind": "review_vote",
+            "recipient_address": recipient_address,
+            "wm_id": wm_id,
+            "token_uri": token_uri,
+            "file_hash": f"0x{file_hash_bytes.hex()}",
+            "tx_hash": receipt.get("tx_hash"),
+            "block_number": receipt.get("block_number"),
+            "gas_used": receipt.get("gas_used"),
+            "vote": {
+                **existing_vote,
+                "active": True,
+            },
+        }
+        content.status = "review"
+        content.next_action = "start_vote"
+        content.save(update_fields=["blockchain", "status", "next_action", "updated_at"])
+        return cls.sync_review_vote(content=content)
+
+    @classmethod
+    def sync_review_vote(cls, *, content: Content) -> Content:
+        blockchain_data = content.blockchain or {}
+        if blockchain_data.get("mint_kind") != "review_vote":
+            raise AIIntegrationError(
+                error_code="INVALID_STATE",
+                error_message="커뮤니티 검증 투표가 아직 생성되지 않았습니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            )
+
+        blockchain = cls._create_client()
+        wm_id = blockchain_data.get("wm_id") or cls._resolve_wm_id(content)
+
+        try:
+            verification = blockchain.verify_document(wm_id)
+            if not verification.get("exists") or not verification.get("token_id"):
+                raise AIIntegrationError(
+                    error_code="BLOCKCHAIN_VOTE_NOT_FOUND",
+                    error_message="생성된 커뮤니티 검증 토큰을 찾을 수 없습니다.",
+                    retryable=True,
+                    status_code=500,
+                    job_id=str(content.public_id),
+                )
+
+            token_id = verification["token_id"]
+            token_info = blockchain.get_document_info(token_id)
+            end_time = token_info.get("end_time") or 0
+            status_name = token_info.get("status") or verification.get("status") or "Pending"
+
+            if status_name == "Pending" and end_time and end_time <= int(timezone.now().timestamp()):
+                blockchain.finalize_status(token_id)
+                verification = blockchain.verify_document(wm_id)
+                token_info = blockchain.get_document_info(token_id)
+                status_name = token_info.get("status") or verification.get("status") or "Pending"
+        except AIIntegrationError:
+            raise
+        except Exception as exc:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_SYNC_FAIL",
+                error_message=str(exc) or "커뮤니티 검증 상태를 동기화하지 못했습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            ) from exc
+
+        chain_id = getattr(blockchain, "chain_id", None)
+        now = timezone.now()
+        vote_payload = cls._build_vote_payload(content=content, token_id=token_id, status_name=status_name, token_info=token_info)
+        minted_at_display = blockchain_data.get("minted_at_display") or timezone.localtime(now).strftime("%Y.%m.%d %H:%M")
+
+        updated_blockchain = {
+            **blockchain_data,
+            "minted": True,
+            "mint_kind": "review_vote",
+            "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
+            "chain_id": chain_id,
+            "contract_address": getattr(blockchain, "contract_address", ""),
+            "recipient_address": blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain),
+            "owner_address": verification.get("owner") or blockchain_data.get("owner_address"),
+            "wm_id": wm_id,
+            "token_id": token_id,
+            "status": verification.get("status") or status_name,
+            "verification_link": verification.get("verification_link"),
+            "token_uri": blockchain_data.get("token_uri") or cls._build_token_uri(content),
+            "minted_at": blockchain_data.get("minted_at") or now.isoformat(),
+            "minted_at_display": minted_at_display,
+            "document": token_info or {},
+            "vote": vote_payload,
+        }
+
+        update_fields = ["blockchain", "updated_at"]
+        content.blockchain = updated_blockchain
+
+        if status_name == "Approved":
+            content.status = "allow"
+            content.decision = "allow"
+            content.reason = "커뮤니티 검증 승인"
+            content.next_action = "none"
+            update_fields.extend(["status", "decision", "reason", "next_action"])
+        elif status_name == "Rejected":
+            content.status = "block"
+            content.decision = "block"
+            content.reason = "커뮤니티 검증 거절"
+            content.next_action = "none"
+            update_fields.extend(["status", "decision", "reason", "next_action"])
+        else:
+            content.status = "review"
+            content.decision = "review"
+            content.next_action = "start_vote"
+            update_fields.extend(["status", "decision", "next_action"])
+
+        content.save(update_fields=update_fields)
         return content
 
     @classmethod
@@ -208,6 +371,24 @@ class ContentBlockchainService:
         )
 
     @classmethod
+    def _load_original_bytes(cls, content: Content) -> bytes:
+        if content.original_file and Path(content.original_file.path).exists():
+            return Path(content.original_file.path).read_bytes()
+
+        if content.original_storage_key and S3StorageService.is_enabled():
+            client = S3StorageService._get_client()
+            obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=content.original_storage_key)
+            return obj["Body"].read()
+
+        raise AIIntegrationError(
+            error_code="FILE_NOT_FOUND",
+            error_message="커뮤니티 검증 생성에 사용할 원본 이미지를 찾을 수 없습니다.",
+            retryable=False,
+            status_code=500,
+            job_id=str(content.public_id),
+        )
+
+    @classmethod
     def _resolve_wm_id(cls, content: Content) -> int:
         watermark = content.watermark or {}
         payload_id = watermark.get("payload_id")
@@ -222,6 +403,45 @@ class ContentBlockchainService:
 
         seed = str(payload_id or content.public_id)
         return max(1, zlib.crc32(seed.encode("utf-8")) & 0xFFFFFFFF)
+
+    @classmethod
+    def _build_vote_payload(cls, *, content: Content, token_id: int, status_name: str, token_info: dict[str, Any]) -> dict[str, Any]:
+        upvotes = int(token_info.get("upvotes") or 0)
+        downvotes = int(token_info.get("downvotes") or 0)
+        started_at = cls._from_unix(token_info.get("timestamp"))
+        end_time = cls._from_unix(token_info.get("end_time"))
+        finalized_at = timezone.now() if status_name in {"Approved", "Rejected"} else None
+        top_cosine = content.top_cosine if isinstance(content.top_cosine, (float, int)) else None
+        threshold = cls.REVIEW_THRESHOLD
+        return {
+            "active": status_name == "Pending",
+            "vote_id": f"VOTE-{token_id}",
+            "status": status_name,
+            "upvotes": upvotes,
+            "downvotes": downvotes,
+            "participant_count": upvotes + downvotes,
+            "started_at": started_at.isoformat() if started_at else None,
+            "started_at_display": cls._format_dt(started_at),
+            "end_time": end_time.isoformat() if end_time else None,
+            "end_time_display": cls._format_dt(end_time),
+            "finalized_at": finalized_at.isoformat() if finalized_at else None,
+            "finalized_at_display": cls._format_dt(finalized_at),
+            "similarity_percent": round(float(top_cosine) * 100, 1) if top_cosine is not None else None,
+            "threshold": threshold,
+            "delta": round(float(top_cosine) - threshold, 4) if top_cosine is not None else None,
+        }
+
+    @classmethod
+    def _from_unix(cls, value: Any):
+        if not value:
+            return None
+        return datetime.fromtimestamp(int(value), tz=timezone.get_current_timezone())
+
+    @classmethod
+    def _format_dt(cls, value) -> str | None:
+        if not value:
+            return None
+        return timezone.localtime(value).strftime("%Y.%m.%d %H:%M")
 
     @classmethod
     def _build_token_uri(cls, content: Content) -> str:

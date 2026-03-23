@@ -157,3 +157,58 @@ class ContentMintView(APIView):
             (content.blockchain or {}).get("tx_hash"),
         )
         return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class ContentReviewVoteStartView(APIView):
+    permission_classes = [IsAuthenticated, IsPhoneVerified]
+
+    def post(self, request, public_id):
+        content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+
+        try:
+            content = ContentBlockchainService.start_review_vote(content=content)
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.review_vote_start.ai_error user_id=%s job_id=%s error_code=%s message=%s",
+                getattr(request.user, "id", None),
+                exc.job_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        logger.info(
+            "contents.review_vote_start.success user_id=%s content_id=%s token_id=%s vote_id=%s",
+            getattr(request.user, "id", None),
+            content.public_id,
+            (content.blockchain or {}).get("token_id"),
+            ((content.blockchain or {}).get("vote") or {}).get("vote_id"),
+        )
+        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class ContentReviewVoteStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, public_id):
+        content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+
+        try:
+            content = ContentBlockchainService.sync_review_vote(content=content)
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.review_vote_status.ai_error user_id=%s job_id=%s error_code=%s message=%s",
+                getattr(request.user, "id", None),
+                exc.job_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        logger.info(
+            "contents.review_vote_status.success user_id=%s content_id=%s status=%s",
+            getattr(request.user, "id", None),
+            content.public_id,
+            ((content.blockchain or {}).get("vote") or {}).get("status"),
+        )
+        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
