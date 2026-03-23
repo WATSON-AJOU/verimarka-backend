@@ -143,10 +143,11 @@ class ContentVerificationService:
         )
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
 
-        selected_match, candidate_content = cls._select_display_candidate(response)
+        selected_match = response.top_match.model_dump() if response.top_match else {}
         top_match = response.top_match.model_dump() if response.top_match else {}
+        candidate_content = ContentRegistrationService._find_content_by_db_key(selected_match.get("db_key") or "")
 
-        candidate_preview_url = cls._resolve_content_image_url(candidate_content)
+        candidate_preview_url = cls._resolve_match_preview_url(selected_match, candidate_content)
         candidate_owner = None
         candidate_registered_at = None
         candidate_file_name = None
@@ -187,35 +188,11 @@ class ContentVerificationService:
                 "threshold": 8,
                 "summary": (
                     "서비스 DB 유사 이미지 후보 1건 발견"
-                    if candidate_content or response.top_match
+                    if response.top_match
                     else "유사 이미지 후보를 찾지 못했습니다."
                 ),
             },
         }
-
-    @classmethod
-    def _select_display_candidate(cls, response) -> tuple[dict, Content | None]:
-        matches: list[dict] = []
-
-        if response.top_match:
-            matches.append(response.top_match.model_dump())
-        matches.extend(candidate.model_dump() for candidate in response.candidates)
-
-        seen_keys: set[str] = set()
-        for match in matches:
-            db_key = match.get("db_key") or ""
-            if db_key in seen_keys:
-                continue
-            if db_key:
-                seen_keys.add(db_key)
-
-            candidate_content = ContentRegistrationService._find_content_by_db_key(db_key)
-            if candidate_content:
-                return match, candidate_content
-
-        if response.top_match:
-            return response.top_match.model_dump(), None
-        return {}, None
 
     @classmethod
     def _write_temp_file(cls, upload) -> Path:
@@ -278,6 +255,21 @@ class ContentVerificationService:
 
         if content.original_file:
             return content.original_file.url
+
+        return None
+
+    @classmethod
+    def _resolve_match_preview_url(cls, match: dict, content: Content | None) -> str | None:
+        content_url = cls._resolve_content_image_url(content)
+        if content_url:
+            return content_url
+
+        db_key = match.get("db_key")
+        if db_key and S3StorageService.is_enabled():
+            try:
+                return S3StorageService.generate_presigned_get_url(key=db_key)
+            except Exception:
+                return None
 
         return None
 
