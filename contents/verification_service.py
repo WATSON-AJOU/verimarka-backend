@@ -117,7 +117,7 @@ class ContentVerificationService:
                 "content_hash": f"0x{blockchain.compute_file_hash_sha256(temp_path.read_bytes()).hex()}",
                 "transaction_hash": (content.blockchain or {}).get("tx_hash") if content else None,
                 "minted_at": (content.blockchain or {}).get("minted_at_display") if content else None,
-                "document": token_info,
+                "document": cls._json_safe(token_info),
             },
         }
 
@@ -256,3 +256,13 @@ class ContentVerificationService:
             return content.original_file.url
 
         return None
+
+    @classmethod
+    def _json_safe(cls, value):
+        if isinstance(value, bytes):
+            return f"0x{value.hex()}"
+        if isinstance(value, dict):
+            return {key: cls._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._json_safe(item) for item in value]
+        return value
