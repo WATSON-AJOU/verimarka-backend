@@ -15,9 +15,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY verimarka-BACKEND/requirements.txt /tmp/backend-requirements.txt
-COPY WATSON_WM/img_guard/requirements.gpu.txt /tmp/ai-requirements.txt
+COPY WATSON_WM/img_guard/requirements.txt /tmp/img_guard/requirements.txt
+COPY WATSON_WM/img_guard/requirements.gpu.txt /tmp/img_guard/requirements.gpu.txt
 RUN pip install --no-cache-dir -r /tmp/backend-requirements.txt \
-    && pip install --no-cache-dir -r /tmp/ai-requirements.txt
+    && pip install --no-cache-dir -r /tmp/img_guard/requirements.gpu.txt
 
 COPY verimarka-BACKEND /app/verimarka-BACKEND
 COPY WATSON_WM /app/WATSON_WM
