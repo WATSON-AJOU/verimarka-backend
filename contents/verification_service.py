@@ -11,6 +11,7 @@ from analysis.watermark_services import WatermarkAIService
 
 from .blockchain_service import ContentBlockchainService
 from .models import Content
+from .services import ContentRegistrationService
 from .storage import S3StorageService
 
 
@@ -142,12 +143,8 @@ class ContentVerificationService:
         )
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
 
-        candidate_content = (
-            Content.objects.filter(decision="allow")
-            .select_related("owner")
-            .order_by("-created_at")
-            .first()
-        )
+        top_match = response.top_match.model_dump() if response.top_match else {}
+        candidate_content = ContentRegistrationService._find_content_by_db_key(top_match.get("db_key") or "")
 
         candidate_preview_url = cls._resolve_content_image_url(candidate_content)
         candidate_owner = None
@@ -164,7 +161,6 @@ class ContentVerificationService:
             candidate_registered_at = timezone.localtime(candidate_content.created_at).strftime("%Y.%m.%d %H:%M")
             candidate_file_name = candidate_content.original_filename
 
-        top_match = response.top_match.model_dump() if response.top_match else {}
         return {
             "outcome": "candidate",
             "headline_badge": "FAILED",

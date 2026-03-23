@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 
 from analysis.contracts import GuardRequestV1
@@ -83,8 +84,8 @@ class ContentRegistrationService:
         content.next_action = response.next_action
         content.top_cosine = response.scores.top_cosine
         content.top_phash_dist = response.scores.top_phash_dist
-        content.top_match = response.top_match.model_dump() if response.top_match else {}
-        content.candidates = [candidate.model_dump() for candidate in response.candidates]
+        content.top_match = cls._enrich_match(response.top_match.model_dump() if response.top_match else {})
+        content.candidates = [cls._enrich_match(candidate.model_dump()) for candidate in response.candidates]
         content.watermark = response.watermark.model_dump()
         content.timing_ms = response.timing_ms.model_dump()
         content.analyzed_at = timezone.now()
@@ -144,3 +145,71 @@ class ContentRegistrationService:
             "s3_key": key,
             "s3_uri": S3StorageService.build_s3_uri(key=key),
         }
+
+    @classmethod
+    def _enrich_match(cls, match: dict) -> dict:
+        if not match:
+            return {}
+
+        db_key = match.get("db_key")
+        if not db_key:
+            return match
+
+        candidate = cls._find_content_by_db_key(db_key)
+        if not candidate:
+            return match
+
+        return {
+            **match,
+            "preview_url": cls._resolve_content_image_url(candidate),
+            "public_id": str(candidate.public_id),
+            "owner_name": cls._resolve_owner_name(candidate),
+            "registered_at": timezone.localtime(candidate.created_at).strftime("%Y.%m.%d %H:%M"),
+        }
+
+    @classmethod
+    def _find_content_by_db_key(cls, db_key: str) -> Content | None:
+        return (
+            Content.objects.filter(decision="allow")
+            .filter(Q(original_storage_key=db_key) | Q(watermark__output_key=db_key))
+            .select_related("owner")
+            .order_by("-created_at")
+            .first()
+        )
+
+    @classmethod
+    def _resolve_content_image_url(cls, content: Content | None) -> str | None:
+        if not content:
+            return None
+
+        watermark = content.watermark or {}
+        output_key = watermark.get("output_key")
+        output_url = watermark.get("output_url")
+
+        if output_key and S3StorageService.is_enabled():
+            return S3StorageService.generate_presigned_get_url(key=output_key)
+
+        if output_url:
+            if output_url.startswith(("http://", "https://")):
+                return output_url
+            base_url = getattr(settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com").rstrip("/")
+            return f"{base_url}{output_url}"
+
+        if content.original_storage_key and S3StorageService.is_enabled():
+            return S3StorageService.generate_presigned_get_url(key=content.original_storage_key)
+
+        if content.original_file:
+            return content.original_file.url
+
+        return None
+
+    @classmethod
+    def _resolve_owner_name(cls, content: Content | None) -> str | None:
+        if not content:
+            return None
+
+        owner = getattr(content, "owner", None)
+        if not owner:
+            return None
+
+        return owner.display_name or owner.nickname or owner.username or owner.email
