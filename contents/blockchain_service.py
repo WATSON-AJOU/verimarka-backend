@@ -106,7 +106,7 @@ class ContentBlockchainService:
             "minted_at_display": timezone.localtime(minted_at).strftime("%Y.%m.%d %H:%M"),
             "model_name": watermark.get("model") or "WAM",
             "model_version": watermark.get("model_version") or "v2.1.0",
-            "document": token_info or {},
+            "document": cls._json_safe(token_info or {}),
         }
         content.save(update_fields=["blockchain", "updated_at"])
         return content
@@ -240,7 +240,7 @@ class ContentBlockchainService:
             "token_uri": blockchain_data.get("token_uri") or cls._build_token_uri(content),
             "minted_at": blockchain_data.get("minted_at") or now.isoformat(),
             "minted_at_display": minted_at_display,
-            "document": token_info or {},
+            "document": cls._json_safe(token_info or {}),
             "vote": vote_payload,
         }
 
@@ -337,6 +337,16 @@ class ContentBlockchainService:
             retryable=False,
             status_code=500,
         )
+
+    @classmethod
+    def _json_safe(cls, value: Any) -> Any:
+        if isinstance(value, bytes):
+            return f"0x{value.hex()}"
+        if isinstance(value, dict):
+            return {key: cls._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._json_safe(item) for item in value]
+        return value
 
     @classmethod
     def _load_watermarked_bytes(cls, content: Content) -> bytes:
