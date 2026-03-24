@@ -68,3 +68,37 @@ class NicknameAvailabilityView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class DisplayNameAvailabilityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        display_name = (request.query_params.get("display_name") or "").strip()
+
+        if not display_name:
+            return Response(
+                {
+                    "available": False,
+                    "message": "표시명을 입력해주세요.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if len(display_name) > 50:
+            return Response(
+                {
+                    "available": False,
+                    "message": "표시명은 50자 이하로 입력해주세요.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        exists = User.objects.filter(display_name=display_name).exclude(id=request.user.id).exists()
+        return Response(
+            {
+                "available": not exists,
+                "message": "사용 가능한 표시명입니다." if not exists else "이미 사용 중인 표시명입니다.",
+            },
+            status=status.HTTP_200_OK,
+        )

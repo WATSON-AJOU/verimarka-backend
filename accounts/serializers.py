@@ -1,11 +1,13 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
+import re
 from .models import User
 
 
 class MeSerializer(serializers.ModelSerializer):
     providers = serializers.SerializerMethodField()
+    last_login_at = serializers.DateTimeField(source="last_login", read_only=True)
 
     class Meta:
         model = User
@@ -18,6 +20,7 @@ class MeSerializer(serializers.ModelSerializer):
             "email_verified",
             "phone",
             "phone_verified",
+            "last_login_at",
             "auth_provider",
             "is_profile_completed",
             "providers",
@@ -31,6 +34,23 @@ class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ("username", "nickname", "display_name", "email")
+
+    def validate_display_name(self, value):
+        display_name = (value or "").strip()
+        if not display_name:
+            raise serializers.ValidationError("표시명은 비워둘 수 없습니다.")
+
+        if len(display_name) > 20:
+            raise serializers.ValidationError("표시명은 20자 이하로 입력해주세요.")
+
+        if not re.fullmatch(r"[A-Za-z0-9가-힣 ]+", display_name):
+            raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
+
+        queryset = User.objects.filter(display_name=display_name).exclude(id=self.instance.id)
+        if queryset.exists():
+            raise serializers.ValidationError("이미 사용 중인 표시명입니다.")
+
+        return display_name
 
     def validate_nickname(self, value):
         nickname = (value or "").strip()
