@@ -1,5 +1,6 @@
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.urls import reverse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -136,7 +137,13 @@ class AnalysisHistoryView(APIView):
             "phash": _format_phash(top_phash),
             "extra": extra,
             "preview_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
-            "download_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
+            "download_url": (
+                request.build_absolute_uri(
+                    reverse("content_watermark_download", kwargs={"public_id": content.public_id})
+                )
+                if content.decision == "allow" and (content.watermark or {}).get("applied")
+                else serialized.get("watermark_file_url") or serialized.get("file_url")
+            ),
             "blockchain": content.blockchain or {},
             "sort_key": content.created_at,
         }

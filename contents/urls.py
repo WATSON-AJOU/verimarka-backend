@@ -8,6 +8,7 @@ from .views import (
     ContentReviewVoteStartView,
     ContentReviewVoteStatusView,
     ContentVerifyView,
+    ContentWatermarkDownloadView,
     ContentWatermarkView,
 )
 
@@ -17,6 +18,7 @@ urlpatterns = [
     path("verify/", ContentVerifyView.as_view(), name="content_verify"),
     path("ongoing-votes/", OngoingReviewVoteListView.as_view(), name="content_ongoing_votes"),
     path("<uuid:public_id>/watermark/", ContentWatermarkView.as_view(), name="content_watermark"),
+    path("<uuid:public_id>/watermark-download/", ContentWatermarkDownloadView.as_view(), name="content_watermark_download"),
     path("<uuid:public_id>/mint/", ContentMintView.as_view(), name="content_mint"),
     path("<uuid:public_id>/review-vote/start/", ContentReviewVoteStartView.as_view(), name="content_review_vote_start"),
     path("<uuid:public_id>/review-vote/", ContentReviewVoteStatusView.as_view(), name="content_review_vote_status"),

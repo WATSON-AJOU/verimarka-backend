@@ -2,8 +2,10 @@ import logging
 import secrets
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from django.conf import settings
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -37,6 +39,18 @@ def _build_async_job_response(job: AIJob, content: Content, request, *, status_c
         },
         status=status_code,
     )
+
+
+def _build_watermarked_download_name(filename: str) -> str:
+    trimmed = (filename or "").strip()
+    if not trimmed:
+        return "watermarked_VM"
+
+    dot_index = trimmed.rfind(".")
+    if dot_index <= 0 or dot_index == len(trimmed) - 1:
+        return f"{trimmed}_VM"
+
+    return f"{trimmed[:dot_index]}_VM{trimmed[dot_index:]}"
 
 
 def _build_content_preview_url(request, content: Content) -> str | None:
@@ -326,6 +340,56 @@ class ContentWatermarkView(APIView):
             )
             return Response(exc.to_response().model_dump(), status=exc.status_code)
         return _build_async_job_response(job, content, request)
+
+
+class ContentWatermarkDownloadView(APIView):
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
+
+    def get(self, request, public_id):
+        content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+        watermark = content.watermark or {}
+        filename = _build_watermarked_download_name(content.original_filename)
+        content_type = content.mime_type or "application/octet-stream"
+
+        output_key = watermark.get("output_key")
+        if output_key and S3StorageService.is_enabled():
+            client = S3StorageService._get_client()
+            obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=output_key)
+            response = FileResponse(
+                obj["Body"],
+                as_attachment=True,
+                filename=filename,
+                content_type=content_type,
+            )
+            response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            return response
+
+        output_path = watermark.get("output_path")
+        if output_path and Path(output_path).exists():
+            response = FileResponse(
+                open(output_path, "rb"),
+                as_attachment=True,
+                filename=filename,
+                content_type=content_type,
+            )
+            response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            return response
+
+        output_url = watermark.get("output_url")
+        if output_url and not str(output_url).startswith(("http://", "https://")):
+            relative_path = str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+            local_path = Path(settings.MEDIA_ROOT) / relative_path
+            if local_path.exists():
+                response = FileResponse(
+                    open(local_path, "rb"),
+                    as_attachment=True,
+                    filename=filename,
+                    content_type=content_type,
+                )
+                response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+                return response
+
+        raise Http404("워터마크 파일을 찾을 수 없습니다.")
 
 
 class ContentMintView(APIView):
