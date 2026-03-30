@@ -4,6 +4,7 @@ from .views import (
     ContentMintView,
     OngoingReviewVoteListView,
     ContentRegisterView,
+    ContentReviewVoteEventSyncView,
     ContentReviewVoteStartView,
     ContentReviewVoteStatusView,
     ContentVerifyView,
@@ -19,4 +20,5 @@ urlpatterns = [
     path("<uuid:public_id>/mint/", ContentMintView.as_view(), name="content_mint"),
     path("<uuid:public_id>/review-vote/start/", ContentReviewVoteStartView.as_view(), name="content_review_vote_start"),
     path("<uuid:public_id>/review-vote/", ContentReviewVoteStatusView.as_view(), name="content_review_vote_status"),
+    path("internal/review-vote/event-sync/", ContentReviewVoteEventSyncView.as_view(), name="content_review_vote_event_sync"),
 ]

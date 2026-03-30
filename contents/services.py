@@ -1,5 +1,6 @@
 import logging
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 
 from django.conf import settings
@@ -18,9 +19,25 @@ logger = logging.getLogger(__name__)
 
 class ContentRegistrationService:
     @classmethod
+    def write_temp_file_with_hash(cls, upload) -> tuple[Path, str]:
+        safe_name = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
+        upload.name = safe_name
+        suffix = Path(safe_name).suffix or ".bin"
+        digest = sha256()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        with temp_file as file_handle:
+            for chunk in upload.chunks():
+                file_handle.write(chunk)
+                digest.update(chunk)
+        return Path(temp_file.name), digest.hexdigest()
+
+    @classmethod
     def register_image(cls, *, user, upload) -> Content:
-        temp_path = cls._write_temp_file(upload)
-        content = cls.create_pending_content(user=user, upload=upload)
+        temp_path, source_sha256 = cls.write_temp_file_with_hash(upload)
+        content = cls.create_pending_content(user=user, upload=upload, source_sha256=source_sha256)
 
         try:
             source_input = cls._build_source_input(content, temp_path=temp_path)
@@ -35,7 +52,7 @@ class ContentRegistrationService:
             temp_path.unlink(missing_ok=True)
 
     @classmethod
-    def create_pending_content(cls, *, user, upload) -> Content:
+    def create_pending_content(cls, *, user, upload, source_sha256: str = "") -> Content:
         safe_filename = sanitize_uploaded_filename(
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
@@ -47,6 +64,7 @@ class ContentRegistrationService:
             status="pending",
             original_file="",
             original_filename=safe_filename,
+            source_sha256=source_sha256,
             mime_type=(getattr(upload, "content_type", "") or "application/octet-stream"),
             file_size=upload.size,
         )
@@ -129,17 +147,8 @@ class ContentRegistrationService:
 
     @classmethod
     def _write_temp_file(cls, upload) -> Path:
-        safe_name = sanitize_uploaded_filename(
-            getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
-        )
-        upload.name = safe_name
-        suffix = Path(safe_name).suffix or ".bin"
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        with temp_file as file_handle:
-            for chunk in upload.chunks():
-                file_handle.write(chunk)
-        return Path(temp_file.name)
+        temp_path, _ = cls.write_temp_file_with_hash(upload)
+        return temp_path
 
     @classmethod
     def _build_source_input(cls, content: Content, *, temp_path: Path) -> dict[str, str]:

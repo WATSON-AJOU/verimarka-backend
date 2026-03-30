@@ -33,6 +33,7 @@ class Content(models.Model):
     original_file = models.FileField(upload_to=content_upload_to)
     original_storage_key = models.CharField(max_length=500, blank=True)
     original_filename = models.CharField(max_length=255)
+    source_sha256 = models.CharField(max_length=64, blank=True, db_index=True)
     mime_type = models.CharField(max_length=100)
     file_size = models.PositiveBigIntegerField(default=0)
 

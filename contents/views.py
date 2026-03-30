@@ -1,6 +1,9 @@
 import logging
+import secrets
 from datetime import datetime
+from pathlib import Path
 
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -25,6 +28,17 @@ from .storage import S3StorageService
 logger = logging.getLogger(__name__)
 
 
+def _build_async_job_response(job: AIJob, content: Content, request, *, status_code=status.HTTP_202_ACCEPTED):
+    return Response(
+        {
+            "job_id": str(job.public_id),
+            "status": job.status,
+            "content": ContentSerializer(content, context={"request": request}).data,
+        },
+        status=status_code,
+    )
+
+
 def _build_content_preview_url(request, content: Content) -> str | None:
     watermark = content.watermark or {}
     output_key = watermark.get("output_key")
@@ -35,6 +49,12 @@ def _build_content_preview_url(request, content: Content) -> str | None:
         return S3StorageService.generate_presigned_get_url(key=content.original_storage_key)
 
     if not content.original_file:
+        return None
+
+    try:
+        if not Path(content.original_file.path).exists():
+            return None
+    except (NotImplementedError, ValueError, OSError):
         return None
 
     url = content.original_file.url
@@ -108,9 +128,35 @@ class ContentRegisterView(APIView):
         )
 
         try:
-            temp_path = ContentRegistrationService._write_temp_file(upload)
+            temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
             try:
-                content = ContentRegistrationService.create_pending_content(user=request.user, upload=upload)
+                existing_content = (
+                    Content.objects.filter(owner=request.user, source_sha256=source_sha256)
+                    .exclude(status="failed")
+                    .order_by("-updated_at")
+                    .first()
+                )
+                if existing_content is not None:
+                    existing_job = (
+                        AIJob.objects.filter(content=existing_content, owner=request.user, job_type="register")
+                        .order_by("-created_at")
+                        .first()
+                    )
+                    if existing_job is not None and existing_job.status in {"queued", "running", "success"}:
+                        logger.info(
+                            "contents.register.idempotent_reuse user_id=%s content_id=%s job_id=%s source_sha256=%s",
+                            getattr(request.user, "id", None),
+                            existing_content.public_id,
+                            existing_job.public_id,
+                            source_sha256,
+                        )
+                        return _build_async_job_response(existing_job, existing_content, request)
+
+                content = ContentRegistrationService.create_pending_content(
+                    user=request.user,
+                    upload=upload,
+                    source_sha256=source_sha256,
+                )
                 source_input = ContentRegistrationService._build_source_input(content, temp_path=temp_path)
             finally:
                 temp_path.unlink(missing_ok=True)
@@ -144,14 +190,7 @@ class ContentRegisterView(APIView):
                 status=exc.status_code,
             )
 
-        return Response(
-            {
-                "job_id": str(job.public_id),
-                "status": job.status,
-                "content": ContentSerializer(content, context={"request": request}).data,
-            },
-            status=status.HTTP_202_ACCEPTED,
-        )
+        return _build_async_job_response(job, content, request)
 
 
 class ContentVerifyView(APIView):
@@ -230,6 +269,35 @@ class ContentWatermarkView(APIView):
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+        watermark = content.watermark or {}
+        if watermark.get("applied") and (watermark.get("output_key") or watermark.get("output_url")):
+            existing_job = (
+                AIJob.objects.filter(owner=request.user, content=content, job_type="watermark")
+                .order_by("-created_at")
+                .first()
+            )
+            if existing_job is not None:
+                logger.info(
+                    "contents.watermark.idempotent_completed user_id=%s content_id=%s job_id=%s",
+                    getattr(request.user, "id", None),
+                    content.public_id,
+                    existing_job.public_id,
+                )
+                return _build_async_job_response(existing_job, content, request, status_code=status.HTTP_200_OK)
+
+        existing_job = (
+            AIJob.objects.filter(owner=request.user, content=content, job_type="watermark", status__in=["queued", "running"])
+            .order_by("-created_at")
+            .first()
+        )
+        if existing_job is not None:
+            logger.info(
+                "contents.watermark.idempotent_reuse user_id=%s content_id=%s job_id=%s",
+                getattr(request.user, "id", None),
+                content.public_id,
+                existing_job.public_id,
+            )
+            return _build_async_job_response(existing_job, content, request)
 
         try:
             job = AIJob.objects.create(
@@ -257,14 +325,7 @@ class ContentWatermarkView(APIView):
                 exc.error_message,
             )
             return Response(exc.to_response().model_dump(), status=exc.status_code)
-        return Response(
-            {
-                "job_id": str(job.public_id),
-                "status": job.status,
-                "content": ContentSerializer(content, context={"request": request}).data,
-            },
-            status=status.HTTP_202_ACCEPTED,
-        )
+        return _build_async_job_response(job, content, request)
 
 
 class ContentMintView(APIView):
@@ -350,6 +411,56 @@ class ContentReviewVoteStatusView(APIView):
         return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
+class ContentReviewVoteEventSyncView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        secret = (settings.BLOCKCHAIN_EVENT_SYNC_SECRET or "").strip()
+        provided = (
+            request.headers.get("X-Blockchain-Sync-Secret")
+            or request.data.get("secret")
+            or ""
+        ).strip()
+
+        if not secret or not secrets.compare_digest(secret, provided):
+            return Response({"message": "forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        token_id = request.data.get("token_id")
+        try:
+            token_id = int(token_id)
+        except (TypeError, ValueError):
+            return Response({"message": "token_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            content = ContentBlockchainService.sync_review_vote_by_token_id(token_id=token_id)
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.review_vote_event_sync.ai_error token_id=%s error_code=%s message=%s",
+                token_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        if content is None:
+            return Response({"message": "content not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        logger.info(
+            "contents.review_vote_event_sync.success token_id=%s content_id=%s status=%s",
+            token_id,
+            content.public_id,
+            ((content.blockchain or {}).get("vote") or {}).get("status"),
+        )
+        return Response(
+            {
+                "content_public_id": str(content.public_id),
+                "token_id": token_id,
+                "status": ((content.blockchain or {}).get("vote") or {}).get("status"),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class OngoingReviewVoteListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -380,7 +491,7 @@ class OngoingReviewVoteListView(APIView):
                 }
             )
 
-            if len(items) >= 8:
+            if len(items) >= 5:
                 break
 
         return Response(items, status=status.HTTP_200_OK)

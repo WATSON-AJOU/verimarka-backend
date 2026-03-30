@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,6 +7,7 @@ import re
 
 from contents.serializers import ContentSerializer
 from contents.models import Content
+from contents.views import _build_content_preview_url, _format_review_vote_summary
 
 from .models import VerificationHistoryLog
 
@@ -40,6 +42,30 @@ def _extract_metric_fallback(reason):
     return cosine, phash
 
 
+def _is_review_vote_closed(vote):
+    if not vote:
+        return False
+
+    status = (vote.get("status") or "").strip()
+    if status and status != "Pending":
+        return True
+
+    end_time = vote.get("end_time")
+    if not end_time:
+        return False
+
+    if isinstance(end_time, str):
+        parsed = parse_datetime(end_time)
+        if parsed is None:
+            return False
+        end_time = parsed
+
+    if timezone.is_naive(end_time):
+        end_time = timezone.make_aware(end_time, timezone.get_current_timezone())
+
+    return end_time <= timezone.now()
+
+
 class AnalysisHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -65,6 +91,8 @@ class AnalysisHistoryView(APIView):
                     "phash": item["phash"],
                     "extra": item["extra"],
                     "preview_url": item["preview_url"],
+                    "blockchain": item.get("blockchain"),
+                    "download_url": item.get("download_url"),
                 }
                 for item in merged
             ]
@@ -92,7 +120,7 @@ class AnalysisHistoryView(APIView):
             )
         elif content.decision == "review":
             end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
-            summary = f"투표 진행 중 · {vote.get('status', 'Pending')}"
+            summary = "종료된 투표" if _is_review_vote_closed(vote) else "투표 진행 중"
             extra = f"마감 {end_time} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}"
         else:
             summary = "유사도 초과로 등록 차단"
@@ -108,6 +136,8 @@ class AnalysisHistoryView(APIView):
             "phash": _format_phash(top_phash),
             "extra": extra,
             "preview_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
+            "download_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
+            "blockchain": content.blockchain or {},
             "sort_key": content.created_at,
         }
 
@@ -133,5 +163,101 @@ class AnalysisHistoryView(APIView):
                 else candidate.get("summary") or detect.get("status_label") or "검증 완료"
             ),
             "preview_url": candidate.get("preview_url") or log.uploaded_preview_url,
+            "download_url": candidate.get("preview_url") or log.uploaded_preview_url,
+            "blockchain": blockchain,
+            "sort_key": log.created_at,
+        }
+
+
+class PublicRecentActivityView(APIView):
+    permission_classes = []
+
+    def get(self, request):
+        content_items = [self._serialize_content(item, request) for item in Content.objects.select_related("owner").all()[:100]]
+        verify_items = [self._serialize_verification(item) for item in VerificationHistoryLog.objects.select_related("user").all()[:100]]
+
+        merged = sorted(content_items + verify_items, key=lambda item: item["sort_key"], reverse=True)[:3]
+        return Response(
+            [
+                {
+                    "id": item.get("id"),
+                    "type": item.get("type"),
+                    "status": item["status"],
+                    "title": item["title"],
+                    "description": item["description"],
+                    "extra": item.get("extra"),
+                    "progress": item["progress"],
+                    "tone": item["tone"],
+                    "preview_url": item["preview_url"],
+                    "blockchain": item.get("blockchain"),
+                }
+                for item in merged
+            ]
+        )
+
+    def _serialize_content(self, content: Content, request):
+        vote = (content.blockchain or {}).get("vote") or {}
+        token_id = (content.blockchain or {}).get("token_id")
+
+        if content.decision == "allow":
+            description = (
+                f"워터마크 삽입 완료 · 토큰 #{token_id}"
+                if token_id
+                else "등록 승인 완료"
+            )
+            progress = None
+            status = "ALLOW"
+            tone = "allow"
+        elif content.decision == "review":
+            description = _format_review_vote_summary(content)
+            progress = None
+            total = int(vote.get("upvotes", 0)) + int(vote.get("downvotes", 0))
+            if total > 0:
+                progress = round((int(vote.get("upvotes", 0)) / total) * 100)
+            status = "REVIEW"
+            tone = "review"
+        else:
+            cosine = f"{content.top_cosine * 100:.1f}%" if content.top_cosine is not None else None
+            description = f"유사도 {cosine}로 등록 차단" if cosine else "유사도 초과로 등록 차단"
+            progress = None
+            status = "BLOCK"
+            tone = "block"
+
+        return {
+            "id": str(content.public_id),
+            "type": content.decision or "block",
+            "status": status,
+            "title": content.original_filename,
+            "description": description,
+            "extra": (
+                f"마감 {vote.get('end_time_display') or vote.get('end_time') or '-'} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}"
+                if content.decision == "review"
+                else content.reason or ""
+            ),
+            "progress": progress,
+            "tone": tone,
+            "preview_url": _build_content_preview_url(request, content),
+            "blockchain": content.blockchain or {},
+            "sort_key": content.created_at,
+        }
+
+    def _serialize_verification(self, log: VerificationHistoryLog):
+        candidate = log.candidate or {}
+        detect = log.detect or {}
+        if log.outcome == "verified":
+            description = f"검증 성공 · Token #{(log.blockchain or {}).get('token_id', '-')}"
+        else:
+            description = candidate.get("summary") or detect.get("status_label") or "검증 실패 · 유사 후보 탐색 완료"
+        return {
+            "id": f"verify-{log.id}",
+            "type": "verify",
+            "status": "VERIFY",
+            "title": log.uploaded_file_name,
+            "description": description,
+            "extra": candidate.get("summary") or detect.get("status_label") or "",
+            "progress": None,
+            "tone": "verify",
+            "preview_url": candidate.get("preview_url") or log.uploaded_preview_url,
+            "blockchain": log.blockchain or {},
             "sort_key": log.created_at,
         }

@@ -316,6 +316,18 @@ class ContentBlockchainService:
         return content
 
     @classmethod
+    def sync_review_vote_by_token_id(cls, *, token_id: int) -> Content | None:
+        content = (
+            Content.objects.select_related("owner")
+            .filter(blockchain__mint_kind="review_vote", blockchain__token_id=token_id)
+            .order_by("-updated_at")
+            .first()
+        )
+        if content is None:
+            return None
+        return cls.sync_review_vote(content=content)
+
+    @classmethod
     def _create_client(cls):
         blockchain_class = cls._get_blockchain_class()
         try:
