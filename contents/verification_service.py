@@ -271,8 +271,8 @@ class ContentVerificationService:
             "candidate": {
                 "preview_url": candidate_preview_url,
                 "file_name": candidate_file_name or selected_match.get("db_file"),
-                "owner_name": candidate_owner or "artist@verimarka.com",
-                "registered_at": candidate_registered_at or "2026.03.18 16:05",
+                "owner_name": candidate_owner or "-",
+                "registered_at": candidate_registered_at or "-",
                 "cosine": selected_match.get("cosine"),
                 "phash_dist": selected_match.get("phash_dist"),
                 "threshold": 8,

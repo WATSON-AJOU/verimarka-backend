@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from rest_framework import serializers
 
 from .models import Content
@@ -40,12 +42,20 @@ class ContentSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    def _local_file_exists(self, file_field) -> bool:
+        if not file_field:
+            return False
+        try:
+            return Path(file_field.path).exists()
+        except (NotImplementedError, ValueError, OSError):
+            return False
+
     def get_file_url(self, obj):
         if obj.original_storage_key and S3StorageService.is_enabled():
             return S3StorageService.generate_presigned_get_url(key=obj.original_storage_key)
 
         request = self.context.get("request")
-        if not obj.original_file:
+        if not self._local_file_exists(obj.original_file):
             return None
         url = obj.original_file.url
         return request.build_absolute_uri(url) if request else url
@@ -63,6 +73,14 @@ class ContentSerializer(serializers.ModelSerializer):
 
         if output_url.startswith("http://") or output_url.startswith("https://"):
             return output_url
+
+        output_path = watermark.get("output_path")
+        if output_path:
+            try:
+                if not Path(output_path).exists():
+                    return None
+            except (TypeError, OSError):
+                return None
 
         request = self.context.get("request")
         return request.build_absolute_uri(output_url) if request else output_url
