@@ -142,7 +142,7 @@ class AnalysisHistoryView(APIView):
                     reverse("content_watermark_download", kwargs={"public_id": content.public_id})
                 )
                 if content.decision == "allow" and (content.watermark or {}).get("applied")
-                else serialized.get("watermark_file_url") or serialized.get("file_url")
+                else None
             ),
             "blockchain": content.blockchain or {},
             "sort_key": content.created_at,
