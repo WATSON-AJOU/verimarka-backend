@@ -138,9 +138,7 @@ class AnalysisHistoryView(APIView):
             "extra": extra,
             "preview_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
             "download_url": (
-                request.build_absolute_uri(
-                    reverse("content_watermark_download", kwargs={"public_id": content.public_id})
-                )
+                reverse("content_watermark_download", kwargs={"public_id": content.public_id})
                 if content.decision == "allow" and (content.watermark or {}).get("applied")
                 else None
             ),
