@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+import re
 
 from contents.serializers import ContentSerializer
 from contents.models import Content
@@ -25,6 +26,18 @@ def _format_phash(value):
     if value is None:
         return "-"
     return f"Distance {value} / Threshold 8"
+
+
+def _extract_metric_fallback(reason):
+    if not reason:
+        return None, None
+
+    cosine_match = re.search(r"cosine\s*=\s*([0-9]*\.?[0-9]+)", reason, re.IGNORECASE)
+    phash_match = re.search(r"phash\s*=\s*([0-9]+)", reason, re.IGNORECASE)
+
+    cosine = float(cosine_match.group(1)) if cosine_match else None
+    phash = int(phash_match.group(1)) if phash_match else None
+    return cosine, phash
 
 
 class AnalysisHistoryView(APIView):
@@ -62,6 +75,9 @@ class AnalysisHistoryView(APIView):
         vote = (content.blockchain or {}).get("vote") or {}
         minted = (content.blockchain or {}).get("minted")
         token_id = (content.blockchain or {}).get("token_id")
+        fallback_cosine, fallback_phash = _extract_metric_fallback(content.reason)
+        top_cosine = content.top_cosine if content.top_cosine is not None else fallback_cosine
+        top_phash = content.top_phash_dist if content.top_phash_dist is not None else fallback_phash
 
         if content.decision == "allow":
             summary = (
@@ -88,8 +104,8 @@ class AnalysisHistoryView(APIView):
             "file_name": content.original_filename,
             "summary": summary,
             "timestamp": _format_datetime(content.created_at),
-            "cosine": _format_cosine(content.top_cosine),
-            "phash": _format_phash(content.top_phash_dist),
+            "cosine": _format_cosine(top_cosine),
+            "phash": _format_phash(top_phash),
             "extra": extra,
             "preview_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
             "sort_key": content.created_at,
