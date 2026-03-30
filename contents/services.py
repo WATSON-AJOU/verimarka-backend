@@ -1,4 +1,5 @@
 import logging
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -8,6 +9,7 @@ from django.utils import timezone
 from analysis.contracts import GuardRequestV1
 from analysis.services import AnalysisGuardService
 
+from .input_safety import sanitize_uploaded_filename
 from .models import Content
 from .storage import S3StorageService
 
@@ -17,12 +19,34 @@ logger = logging.getLogger(__name__)
 class ContentRegistrationService:
     @classmethod
     def register_image(cls, *, user, upload) -> Content:
+        temp_path = cls._write_temp_file(upload)
+        content = cls.create_pending_content(user=user, upload=upload)
+
+        try:
+            source_input = cls._build_source_input(content, temp_path=temp_path)
+            logger.info(
+                "contents.register.source_input content_id=%s source_input=%s",
+                content.public_id,
+                source_input,
+            )
+
+            return cls.run_guard_for_content(content=content, user_id=user.id, source_input=source_input)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @classmethod
+    def create_pending_content(cls, *, user, upload) -> Content:
+        safe_filename = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
+        upload.name = safe_filename
         content = Content.objects.create(
             owner=user,
             content_type="image",
             status="pending",
-            original_file=upload,
-            original_filename=upload.name,
+            original_file="",
+            original_filename=safe_filename,
             mime_type=(getattr(upload, "content_type", "") or "application/octet-stream"),
             file_size=upload.size,
         )
@@ -35,14 +59,10 @@ class ContentRegistrationService:
             content.mime_type,
             content.file_size,
         )
+        return content
 
-        source_input = cls._build_source_input(content)
-        logger.info(
-            "contents.register.source_input content_id=%s source_input=%s",
-            content.public_id,
-            source_input,
-        )
-
+    @classmethod
+    def run_guard_for_content(cls, *, content: Content, user_id: int, source_input: dict[str, str]) -> Content:
         guard_request = GuardRequestV1(
             job_id=str(content.public_id),
             mode="register",
@@ -55,7 +75,7 @@ class ContentRegistrationService:
                 }
             ],
             meta={
-                "user_id": str(user.id),
+                "user_id": str(user_id),
                 "content_id": str(content.public_id),
             },
             options={},
@@ -108,9 +128,23 @@ class ContentRegistrationService:
         return content
 
     @classmethod
-    def _build_source_input(cls, content: Content) -> dict[str, str]:
+    def _write_temp_file(cls, upload) -> Path:
+        safe_name = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
+        upload.name = safe_name
+        suffix = Path(safe_name).suffix or ".bin"
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        with temp_file as file_handle:
+            for chunk in upload.chunks():
+                file_handle.write(chunk)
+        return Path(temp_file.name)
+
+    @classmethod
+    def _build_source_input(cls, content: Content, *, temp_path: Path) -> dict[str, str]:
         if not S3StorageService.is_enabled():
-            resolved_path = str(Path(content.original_file.path).resolve())
+            resolved_path = str(temp_path.resolve())
             logger.info(
                 "contents.register.source_mode content_id=%s mode=local path=%s",
                 content.public_id,
@@ -128,7 +162,7 @@ class ContentRegistrationService:
             stage=settings.CONTENT_ORIGINAL_PREFIX,
         )
         S3StorageService.upload_file(
-            local_path=content.original_file.path,
+            local_path=str(temp_path),
             key=key,
             content_type=content.mime_type,
         )

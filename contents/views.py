@@ -1,6 +1,8 @@
 import logging
+from datetime import datetime
 
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
@@ -8,7 +10,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from analysis.services import AIIntegrationError
-from accounts.permissions import IsPhoneVerified
+from analysis.models import AIJob
+from analysis.tasks import run_register_analysis_job, run_verify_job, run_watermark_job
+from accounts.permissions import IsPhoneVerified, IsWalletLinked
 
 from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
 from .services import ContentRegistrationService
@@ -16,18 +20,85 @@ from .models import Content
 from .blockchain_service import ContentBlockchainService
 from .verification_service import ContentVerificationService
 from .watermark_service import ContentWatermarkService
+from .storage import S3StorageService
 
 logger = logging.getLogger(__name__)
 
 
+def _build_content_preview_url(request, content: Content) -> str | None:
+    watermark = content.watermark or {}
+    output_key = watermark.get("output_key")
+    if output_key and S3StorageService.is_enabled():
+        return S3StorageService.generate_presigned_get_url(key=output_key)
+
+    if content.original_storage_key and S3StorageService.is_enabled():
+        return S3StorageService.generate_presigned_get_url(key=content.original_storage_key)
+
+    if not content.original_file:
+        return None
+
+    url = content.original_file.url
+    return request.build_absolute_uri(url) if request else url
+
+
+def _format_review_vote_summary(content: Content) -> str:
+    vote = (content.blockchain or {}).get("vote") or {}
+    end_time_raw = vote.get("end_time")
+    if not end_time_raw:
+        return "투표 진행 중"
+
+    try:
+        end_time = datetime.fromisoformat(str(end_time_raw))
+        if timezone.is_naive(end_time):
+            end_time = timezone.make_aware(end_time, timezone.get_current_timezone())
+    except ValueError:
+        return "투표 진행 중"
+
+    remaining = end_time - timezone.now()
+    if remaining.total_seconds() <= 0:
+        return "투표 마감 대기"
+
+    days_left = max(1, int((remaining.total_seconds() + 86399) // 86400))
+    return f"투표 진행 중 · D-{days_left}"
+
+
+def _is_vote_still_open(content: Content) -> bool:
+    vote = (content.blockchain or {}).get("vote") or {}
+    if vote.get("status") != "Pending":
+        return False
+
+    end_time_raw = vote.get("end_time")
+    if not end_time_raw:
+        return True
+
+    try:
+        end_time = datetime.fromisoformat(str(end_time_raw))
+        if timezone.is_naive(end_time):
+            end_time = timezone.make_aware(end_time, timezone.get_current_timezone())
+    except ValueError:
+        return True
+
+    return end_time > timezone.now()
+
+
 class ContentRegisterView(APIView):
     parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request):
         serializer = ContentRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         upload = serializer.validated_data["file"]
+        if not S3StorageService.is_enabled():
+            return Response(
+                {
+                    "error_code": "ASYNC_STORAGE_REQUIRED",
+                    "error_message": "Celery 비동기 등록 처리를 위해 S3 저장소가 활성화되어야 합니다.",
+                    "retryable": False,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         logger.info(
             "contents.register.request user_id=%s filename=%s size=%s content_type=%s",
             getattr(request.user, "id", None),
@@ -37,9 +108,28 @@ class ContentRegisterView(APIView):
         )
 
         try:
-            content = ContentRegistrationService.register_image(
-                user=request.user,
-                upload=upload,
+            temp_path = ContentRegistrationService._write_temp_file(upload)
+            try:
+                content = ContentRegistrationService.create_pending_content(user=request.user, upload=upload)
+                source_input = ContentRegistrationService._build_source_input(content, temp_path=temp_path)
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+            job = AIJob.objects.create(
+                owner=request.user,
+                content=content,
+                job_type="register",
+                request_payload={"source_input": source_input},
+            )
+            task = run_register_analysis_job.delay(str(job.public_id))
+            job.celery_task_id = task.id
+            job.save(update_fields=["celery_task_id", "updated_at"])
+            logger.info(
+                "contents.register.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
+                getattr(request.user, "id", None),
+                content.public_id,
+                job.public_id,
+                task.id,
             )
         except AIIntegrationError as exc:
             logger.exception(
@@ -54,28 +144,33 @@ class ContentRegisterView(APIView):
                 status=exc.status_code,
             )
 
-        logger.info(
-            "contents.register.success user_id=%s content_id=%s decision=%s next_action=%s",
-            getattr(request.user, "id", None),
-            content.public_id,
-            content.decision,
-            content.next_action,
-        )
-
         return Response(
-            ContentSerializer(content, context={"request": request}).data,
-            status=status.HTTP_201_CREATED,
+            {
+                "job_id": str(job.public_id),
+                "status": job.status,
+                "content": ContentSerializer(content, context={"request": request}).data,
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
 
 class ContentVerifyView(APIView):
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsAuthenticated, IsPhoneVerified]
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request):
         serializer = ContentVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         upload = serializer.validated_data["file"]
+        if not S3StorageService.is_enabled():
+            return Response(
+                {
+                    "error_code": "ASYNC_STORAGE_REQUIRED",
+                    "error_message": "Celery 비동기 검증 처리를 위해 S3 저장소가 활성화되어야 합니다.",
+                    "retryable": False,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         logger.info(
             "contents.verify.request user_id=%s filename=%s size=%s content_type=%s",
@@ -86,7 +181,32 @@ class ContentVerifyView(APIView):
         )
 
         try:
-            result = ContentVerificationService.verify_image(user=request.user, upload=upload)
+            temp_path = ContentVerificationService._write_temp_file(upload)
+            try:
+                source_input = ContentVerificationService._build_source_input(temp_path=temp_path, upload=upload)
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+            job = AIJob.objects.create(
+                owner=request.user,
+                job_type="verify",
+                request_payload={
+                    "source_input": source_input,
+                    "upload_name": upload.name,
+                    "upload_size": upload.size,
+                    "upload_content_type": getattr(upload, "content_type", "") or "application/octet-stream",
+                },
+            )
+            task = run_verify_job.delay(str(job.public_id))
+            job.celery_task_id = task.id
+            job.save(update_fields=["celery_task_id", "updated_at"])
+            logger.info(
+                "contents.verify.enqueued user_id=%s job_id=%s celery_task_id=%s filename=%s",
+                getattr(request.user, "id", None),
+                job.public_id,
+                task.id,
+                upload.name,
+            )
         except AIIntegrationError as exc:
             logger.exception(
                 "contents.verify.ai_error user_id=%s error_code=%s message=%s",
@@ -96,22 +216,38 @@ class ContentVerifyView(APIView):
             )
             return Response(exc.to_response().model_dump(), status=exc.status_code)
 
-        logger.info(
-            "contents.verify.success user_id=%s outcome=%s",
-            getattr(request.user, "id", None),
-            result.get("outcome"),
+        return Response(
+            {
+                "job_id": str(job.public_id),
+                "status": job.status,
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
-        return Response(result, status=status.HTTP_200_OK)
 
 
 class ContentWatermarkView(APIView):
-    permission_classes = [IsAuthenticated, IsPhoneVerified]
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
 
         try:
-            content = ContentWatermarkService.apply_watermark(content=content)
+            job = AIJob.objects.create(
+                owner=request.user,
+                content=content,
+                job_type="watermark",
+                request_payload={"content_public_id": str(content.public_id)},
+            )
+            task = run_watermark_job.delay(str(job.public_id))
+            job.celery_task_id = task.id
+            job.save(update_fields=["celery_task_id", "updated_at"])
+            logger.info(
+                "contents.watermark.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
+                getattr(request.user, "id", None),
+                content.public_id,
+                job.public_id,
+                task.id,
+            )
         except AIIntegrationError as exc:
             logger.exception(
                 "contents.watermark.ai_error user_id=%s job_id=%s error_code=%s message=%s",
@@ -121,18 +257,18 @@ class ContentWatermarkView(APIView):
                 exc.error_message,
             )
             return Response(exc.to_response().model_dump(), status=exc.status_code)
-
-        logger.info(
-            "contents.watermark.success user_id=%s content_id=%s output_key=%s",
-            getattr(request.user, "id", None),
-            content.public_id,
-            (content.watermark or {}).get("output_key"),
+        return Response(
+            {
+                "job_id": str(job.public_id),
+                "status": job.status,
+                "content": ContentSerializer(content, context={"request": request}).data,
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
-        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
 class ContentMintView(APIView):
-    permission_classes = [IsAuthenticated, IsPhoneVerified]
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
@@ -160,7 +296,7 @@ class ContentMintView(APIView):
 
 
 class ContentReviewVoteStartView(APIView):
-    permission_classes = [IsAuthenticated, IsPhoneVerified]
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
@@ -212,3 +348,39 @@ class ContentReviewVoteStatusView(APIView):
             ((content.blockchain or {}).get("vote") or {}).get("status"),
         )
         return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class OngoingReviewVoteListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = []
+        queryset = Content.objects.select_related("owner").filter(decision="review").order_by("-updated_at")[:50]
+
+        for content in queryset:
+            if not _is_vote_still_open(content):
+                continue
+
+            owner_name = (
+                getattr(content.owner, "display_name", "")
+                or getattr(content.owner, "nickname", "")
+                or getattr(content.owner, "username", "")
+                or getattr(content.owner, "email", "").split("@")[0]
+                or "사용자"
+            )
+
+            items.append(
+                {
+                    "id": str(content.public_id),
+                    "title": content.original_filename,
+                    "owner": owner_name,
+                    "date": timezone.localtime(content.updated_at).strftime("%Y.%m.%d"),
+                    "description": _format_review_vote_summary(content),
+                    "preview_url": _build_content_preview_url(request, content),
+                }
+            )
+
+            if len(items) >= 8:
+                break
+
+        return Response(items, status=status.HTTP_200_OK)

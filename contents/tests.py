@@ -82,7 +82,7 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(content.status, "allow")
         self.assertEqual(content.decision, "allow")
         self.assertEqual(content.original_filename, "sample.png")
-        self.assertTrue(content.original_file.name.endswith("sample.png"))
+        self.assertEqual(content.original_file.name, "")
         self.assertIsNotNone(content.analyzed_at)
 
     def test_register_rejects_non_image_file(self):
@@ -100,3 +100,43 @@ class ContentRegisterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Content.objects.count(), 0)
+
+    def test_register_sanitizes_filename_before_persisting(self):
+        upload = SimpleUploadedFile(
+            "../../evil file!!.png",
+            b"\x89PNG\r\n\x1a\nfakepngcontent",
+            content_type="image/png",
+        )
+
+        with patch("contents.views.S3StorageService.is_enabled", return_value=True), \
+             patch("contents.services.S3StorageService.is_enabled", return_value=True), \
+             patch("contents.services.S3StorageService.upload_file"), \
+             patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png"), \
+             patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png"), \
+             patch("analysis.tasks.run_register_analysis_job.delay") as mocked_delay:
+            mocked_delay.return_value.id = "celery-task-1"
+            response = self.client.post(
+                "/api/contents/register/",
+                {"file": upload},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        content = Content.objects.get()
+        self.assertEqual(content.original_filename, "evil file_.png")
+
+    def test_register_rejects_mime_and_extension_mismatch(self):
+        upload = SimpleUploadedFile(
+            "sample.png",
+            b"\xff\xd8\xff\xe0fakejpegcontent",
+            content_type="image/jpeg",
+        )
+
+        response = self.client.post(
+            "/api/contents/register/",
+            {"file": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("확장자와 MIME", str(response.json()))

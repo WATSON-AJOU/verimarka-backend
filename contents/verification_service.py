@@ -11,6 +11,7 @@ from analysis.services import AIIntegrationError, AnalysisGuardService
 from analysis.watermark_services import WatermarkAIService
 
 from .blockchain_service import ContentBlockchainService
+from .input_safety import sanitize_uploaded_filename
 from .models import Content
 from .services import ContentRegistrationService
 from .storage import S3StorageService
@@ -21,77 +22,21 @@ logger = logging.getLogger(__name__)
 class ContentVerificationService:
     @classmethod
     def verify_image(cls, *, user, upload) -> dict:
+        upload.name = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
         temp_path = cls._write_temp_file(upload)
         try:
             source_input = cls._build_source_input(temp_path=temp_path, upload=upload)
-            verify_job_id = f"verify-{timezone.now().timestamp()}"
-            logger.info(
-                "contents.verify.detect_request user_id=%s job_id=%s source_input=%s",
-                getattr(user, "id", None),
-                verify_job_id,
-                {
-                    **source_input,
-                    "filename": upload.name,
-                    "mime_type": getattr(upload, "content_type", "") or "application/octet-stream",
-                },
+            return cls.verify_from_source_input(
+                user=user,
+                upload_name=upload.name,
+                upload_size=upload.size,
+                upload_content_type=getattr(upload, "content_type", "") or "application/octet-stream",
+                source_input=source_input,
+                temp_path=temp_path,
             )
-            detect_response = WatermarkAIService.detect(
-                {
-                    "job_id": verify_job_id,
-                    "input": {
-                        **source_input,
-                        "filename": upload.name,
-                        "mime_type": getattr(upload, "content_type", "") or "application/octet-stream",
-                    },
-                    "options": {
-                        "model": "wam",
-                        "threshold": 0.5,
-                    },
-                }
-            )
-
-            detect_result = detect_response.get("result", {})
-            logger.info(
-                "contents.verify.detect_response user_id=%s job_id=%s success=%s detected=%s payload_id=%s confidence=%s bit_accuracy=%s reason=%s",
-                getattr(user, "id", None),
-                verify_job_id,
-                detect_response.get("success"),
-                detect_result.get("detected"),
-                detect_result.get("payload_id"),
-                detect_result.get("confidence"),
-                detect_result.get("bit_accuracy"),
-                detect_response.get("reason"),
-            )
-            if detect_response.get("success") and detect_result.get("detected"):
-                verified_payload = cls._build_verified_result(
-                    user=user,
-                    upload=upload,
-                    temp_path=temp_path,
-                    detect_result=detect_result,
-                )
-                if verified_payload:
-                    logger.info(
-                        "contents.verify.detect_verified user_id=%s job_id=%s token_id=%s verification_link=%s",
-                        getattr(user, "id", None),
-                        verify_job_id,
-                        ((verified_payload.get("blockchain") or {}).get("token_id")),
-                        ((verified_payload.get("blockchain") or {}).get("verification_link")),
-                    )
-                    return verified_payload
-                logger.info(
-                    "contents.verify.detect_unresolved user_id=%s job_id=%s payload_id=%s",
-                    getattr(user, "id", None),
-                    verify_job_id,
-                    detect_result.get("payload_id"),
-                )
-
-            logger.info(
-                "contents.verify.fallback_start user_id=%s job_id=%s reason=%s",
-                getattr(user, "id", None),
-                verify_job_id,
-                "watermark_not_detected_or_not_resolved",
-            )
-            return cls._build_candidate_result(user=user, upload=upload, source_input=source_input)
         finally:
             try:
                 temp_path.unlink(missing_ok=True)
@@ -99,7 +44,95 @@ class ContentVerificationService:
                 pass
 
     @classmethod
-    def _build_verified_result(cls, *, user, upload, temp_path: Path, detect_result: dict) -> dict | None:
+    def verify_from_source_input(
+        cls,
+        *,
+        user,
+        upload_name: str,
+        upload_size: int,
+        upload_content_type: str,
+        source_input: dict[str, str],
+        temp_path: Path | None = None,
+    ) -> dict:
+        upload_name = sanitize_uploaded_filename(upload_name, mime_type=upload_content_type)
+        verify_job_id = f"verify-{timezone.now().timestamp()}"
+        logger.info(
+            "contents.verify.detect_request user_id=%s job_id=%s source_input=%s",
+            getattr(user, "id", None),
+            verify_job_id,
+            {
+                **source_input,
+                "filename": upload_name,
+                "mime_type": upload_content_type,
+            },
+        )
+        detect_response = WatermarkAIService.detect(
+            {
+                "job_id": verify_job_id,
+                "input": {
+                    **source_input,
+                    "filename": upload_name,
+                    "mime_type": upload_content_type,
+                },
+                "options": {
+                    "model": "wam",
+                    "threshold": 0.5,
+                },
+            }
+        )
+
+        detect_result = detect_response.get("result", {})
+        logger.info(
+            "contents.verify.detect_response user_id=%s job_id=%s success=%s detected=%s payload_id=%s confidence=%s bit_accuracy=%s reason=%s",
+            getattr(user, "id", None),
+            verify_job_id,
+            detect_response.get("success"),
+            detect_result.get("detected"),
+            detect_result.get("payload_id"),
+            detect_result.get("confidence"),
+            detect_result.get("bit_accuracy"),
+            detect_response.get("reason"),
+        )
+        if detect_response.get("success") and detect_result.get("detected"):
+            verified_payload = cls._build_verified_result(
+                user=user,
+                upload_name=upload_name,
+                upload_size=upload_size,
+                temp_path=temp_path,
+                detect_result=detect_result,
+            )
+            if verified_payload:
+                logger.info(
+                    "contents.verify.detect_verified user_id=%s job_id=%s token_id=%s verification_link=%s",
+                    getattr(user, "id", None),
+                    verify_job_id,
+                    ((verified_payload.get("blockchain") or {}).get("token_id")),
+                    ((verified_payload.get("blockchain") or {}).get("verification_link")),
+                )
+                return verified_payload
+            logger.info(
+                "contents.verify.detect_unresolved user_id=%s job_id=%s payload_id=%s",
+                getattr(user, "id", None),
+                verify_job_id,
+                detect_result.get("payload_id"),
+            )
+
+        logger.info(
+            "contents.verify.fallback_start user_id=%s job_id=%s reason=%s",
+            getattr(user, "id", None),
+            verify_job_id,
+            "watermark_not_detected_or_not_resolved",
+        )
+        return cls._build_candidate_result(
+            user=user,
+            upload_name=upload_name,
+            upload_size=upload_size,
+            upload_content_type=upload_content_type,
+            source_input=source_input,
+        )
+
+    @classmethod
+    def _build_verified_result(cls, *, user, upload_name: str, upload_size: int, temp_path: Path | None, detect_result: dict) -> dict | None:
         wm_id = cls._resolve_wm_id(detect_result.get("payload_id"))
         blockchain = ContentBlockchainService._create_client()
 
@@ -136,8 +169,8 @@ class ContentVerificationService:
             "headline_title": "워터마크 검증에 성공했습니다.",
             "headline_subtitle": "검출된 워터마크와 블록체인 토큰을 연결했습니다.",
             "uploaded": {
-                "file_name": upload.name,
-                "file_size": upload.size,
+                "file_name": upload_name,
+                "file_size": upload_size,
                 "preview_url": image_url,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
                 "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
@@ -159,7 +192,7 @@ class ContentVerificationService:
                     getattr(blockchain, "chain_id", None),
                     f"Chain {getattr(blockchain, 'chain_id', '')}".strip(),
                 ),
-                "content_hash": f"0x{blockchain.compute_file_hash_sha256(temp_path.read_bytes()).hex()}",
+                "content_hash": f"0x{blockchain.compute_file_hash_sha256(temp_path.read_bytes()).hex()}" if temp_path else None,
                 "transaction_hash": (content.blockchain or {}).get("tx_hash") if content else None,
                 "minted_at": (content.blockchain or {}).get("minted_at_display") if content else None,
                 "document": cls._json_safe(token_info),
@@ -167,7 +200,7 @@ class ContentVerificationService:
         }
 
     @classmethod
-    def _build_candidate_result(cls, *, user, upload, source_input: dict) -> dict:
+    def _build_candidate_result(cls, *, user, upload_name: str, upload_size: int, upload_content_type: str, source_input: dict) -> dict:
         fallback_job_id = f"verify-fallback-{timezone.now().timestamp()}"
         guard_request = GuardRequestV1(
             job_id=fallback_job_id,
@@ -176,13 +209,13 @@ class ContentVerificationService:
             input=[
                 {
                     **source_input,
-                    "filename": upload.name,
-                    "mime_type": getattr(upload, "content_type", "") or "application/octet-stream",
+                    "filename": upload_name,
+                    "mime_type": upload_content_type,
                 }
             ],
             meta={
                 "user_id": str(getattr(user, "id", "")),
-                "verify_filename": upload.name,
+                "verify_filename": upload_name,
             },
             options={},
         )
@@ -225,8 +258,8 @@ class ContentVerificationService:
             "headline_title": "워터마크 검출에 실패했습니다.",
             "headline_subtitle": "서비스 내 유사 이미지 후보를 탐색한 결과를 확인하세요.",
             "uploaded": {
-                "file_name": upload.name,
-                "file_size": upload.size,
+                "file_name": upload_name,
+                "file_size": upload_size,
                 "preview_url": None,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
                 "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
@@ -275,7 +308,12 @@ class ContentVerificationService:
 
     @classmethod
     def _write_temp_file(cls, upload) -> Path:
-        suffix = Path(upload.name).suffix or ".png"
+        safe_name = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
+        upload.name = safe_name
+        suffix = Path(safe_name).suffix or ".png"
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         with temp_file as f:
             for chunk in upload.chunks():
@@ -284,13 +322,18 @@ class ContentVerificationService:
 
     @classmethod
     def _build_source_input(cls, *, temp_path: Path, upload) -> dict[str, str]:
+        safe_name = sanitize_uploaded_filename(
+            getattr(upload, "name", ""),
+            mime_type=getattr(upload, "content_type", "") or None,
+        )
+        upload.name = safe_name
         if not S3StorageService.is_enabled():
             return {"url": str(temp_path.resolve())}
 
         key = S3StorageService.build_content_key(
             owner_id=0,
-            content_public_id=f"verify-{zlib.crc32(upload.name.encode('utf-8')) & 0xFFFFFFFF}",
-            filename=upload.name,
+            content_public_id=f"verify-{zlib.crc32(safe_name.encode('utf-8')) & 0xFFFFFFFF}",
+            filename=safe_name,
             stage="verify",
         )
         S3StorageService.upload_file(

@@ -63,7 +63,7 @@ class ContentBlockchainService:
             return content
 
         blockchain = cls._create_client()
-        recipient_address = cls._resolve_recipient_address(blockchain)
+        recipient_address = cls._resolve_recipient_address(blockchain, content=content)
         file_bytes = cls._load_watermarked_bytes(content)
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
@@ -94,6 +94,12 @@ class ContentBlockchainService:
 
         chain_id = getattr(blockchain, "chain_id", None)
         minted_at = timezone.now()
+        logger.info(
+            "contents.blockchain.mint_prepare content_id=%s recipient_address=%s wallet_linked=%s",
+            content.public_id,
+            recipient_address,
+            bool(getattr(content.owner, "wallet_link", None)),
+        )
         content.blockchain = {
             **existing_blockchain,
             "minted": True,
@@ -139,7 +145,7 @@ class ContentBlockchainService:
             return cls.sync_review_vote(content=content)
 
         blockchain = cls._create_client()
-        recipient_address = cls._resolve_recipient_address(blockchain)
+        recipient_address = cls._resolve_recipient_address(blockchain, content=content)
         file_bytes = cls._load_original_bytes(content)
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
@@ -272,7 +278,7 @@ class ContentBlockchainService:
             "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
-            "recipient_address": blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain),
+            "recipient_address": blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain, content=content),
             "owner_address": verification.get("owner") or blockchain_data.get("owner_address"),
             "wm_id": wm_id,
             "token_id": token_id,
@@ -511,24 +517,17 @@ class ContentBlockchainService:
         return aimodel_root
 
     @classmethod
-    def _resolve_recipient_address(cls, blockchain) -> str:
-        recipient = getattr(settings, "WATSON_RECIPIENT_ADDRESS", "") or ""
-        if recipient:
-            return recipient
-
-        owner_address = blockchain.get_owner_address()
-        if owner_address:
-            return owner_address
-
-        minter_address = blockchain.get_minter_address()
-        if minter_address:
-            return minter_address
+    def _resolve_recipient_address(cls, blockchain, *, content: Content) -> str:
+        wallet_link = getattr(content.owner, "wallet_link", None)
+        if wallet_link and wallet_link.address:
+            return wallet_link.address
 
         raise AIIntegrationError(
-            error_code="BLOCKCHAIN_CONFIG_ERROR",
-            error_message="NFT 수신 지갑 주소를 확인할 수 없습니다.",
+            error_code="WALLET_NOT_LINKED",
+            error_message="연동된 사용자 지갑 주소를 확인할 수 없습니다.",
             retryable=False,
-            status_code=500,
+            status_code=400,
+            job_id=str(content.public_id),
         )
 
     @classmethod
@@ -575,13 +574,13 @@ class ContentBlockchainService:
 
     @classmethod
     def _load_original_bytes(cls, content: Content) -> bytes:
-        if content.original_file and Path(content.original_file.path).exists():
-            return Path(content.original_file.path).read_bytes()
-
         if content.original_storage_key and S3StorageService.is_enabled():
             client = S3StorageService._get_client()
             obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=content.original_storage_key)
             return obj["Body"].read()
+
+        if content.original_file and Path(content.original_file.path).exists():
+            return Path(content.original_file.path).read_bytes()
 
         raise AIIntegrationError(
             error_code="FILE_NOT_FOUND",

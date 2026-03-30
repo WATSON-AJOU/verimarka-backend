@@ -1,8 +1,9 @@
 from django.urls import path
 
-from .views import GuardAnalyzeView
+from .views import AIJobDetailView, GuardAnalyzeView
 
 
 urlpatterns = [
     path("guard/", GuardAnalyzeView.as_view(), name="analysis_guard"),
+    path("jobs/<uuid:public_id>/", AIJobDetailView.as_view(), name="analysis_job_detail"),
 ]

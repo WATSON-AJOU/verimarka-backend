@@ -3,6 +3,8 @@ from pathlib import Path
 import boto3
 from django.conf import settings
 
+from .input_safety import sanitize_uploaded_filename
+
 
 class S3StorageService:
     _client = None
@@ -55,7 +57,7 @@ class S3StorageService:
         filename: str,
         stage: str,
     ) -> str:
-        safe_name = Path(filename).name
+        safe_name = sanitize_uploaded_filename(filename)
         prefix = stage.strip("/ ")
         return f"{prefix}/{owner_id}/{content_public_id}/{safe_name}"
 

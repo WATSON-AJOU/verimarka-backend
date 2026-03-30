@@ -5,9 +5,20 @@ import re
 from .models import User
 
 
+DISPLAY_NAME_PATTERN = r"[A-Za-z0-9가-힣 ]+"
+NICKNAME_PATTERN = r"[A-Za-z0-9가-힣 ]+"
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
+
+
 class MeSerializer(serializers.ModelSerializer):
     providers = serializers.SerializerMethodField()
     last_login_at = serializers.DateTimeField(source="last_login", read_only=True)
+    wallet_address = serializers.SerializerMethodField()
+    wallet_chain_id = serializers.SerializerMethodField()
+    wallet_type = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -24,10 +35,25 @@ class MeSerializer(serializers.ModelSerializer):
             "auth_provider",
             "is_profile_completed",
             "providers",
+            "wallet_address",
+            "wallet_chain_id",
+            "wallet_type",
         )
 
     def get_providers(self, obj):
         return [item.provider for item in obj.social_accounts.all()]
+
+    def get_wallet_address(self, obj):
+        wallet_link = getattr(obj, "wallet_link", None)
+        return wallet_link.address if wallet_link else None
+
+    def get_wallet_chain_id(self, obj):
+        wallet_link = getattr(obj, "wallet_link", None)
+        return wallet_link.chain_id if wallet_link else None
+
+    def get_wallet_type(self, obj):
+        wallet_link = getattr(obj, "wallet_link", None)
+        return wallet_link.wallet_type if wallet_link else ""
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
@@ -36,14 +62,14 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         fields = ("username", "nickname", "display_name", "email")
 
     def validate_display_name(self, value):
-        display_name = (value or "").strip()
+        display_name = _normalize_text(value)
         if not display_name:
             raise serializers.ValidationError("표시명은 비워둘 수 없습니다.")
 
         if len(display_name) > 20:
             raise serializers.ValidationError("표시명은 20자 이하로 입력해주세요.")
 
-        if not re.fullmatch(r"[A-Za-z0-9가-힣 ]+", display_name):
+        if not re.fullmatch(DISPLAY_NAME_PATTERN, display_name):
             raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
 
         queryset = User.objects.filter(display_name=display_name).exclude(id=self.instance.id)
@@ -53,9 +79,13 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         return display_name
 
     def validate_nickname(self, value):
-        nickname = (value or "").strip()
+        nickname = _normalize_text(value)
         if not nickname:
             raise serializers.ValidationError("닉네임은 비워둘 수 없습니다.")
+        if len(nickname) > 30:
+            raise serializers.ValidationError("닉네임은 30자 이하로 입력해주세요.")
+        if not re.fullmatch(NICKNAME_PATTERN, nickname):
+            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
 
         queryset = User.objects.filter(nickname=nickname).exclude(id=self.instance.id)
         if queryset.exists():
@@ -64,7 +94,7 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         return nickname
 
     def validate_email(self, value):
-        email = (value or "").strip().lower()
+        email = _normalize_text(value).lower()
         if not email:
             raise serializers.ValidationError("이메일은 비워둘 수 없습니다.")
 
@@ -112,24 +142,31 @@ class EmailVerifySerializer(serializers.Serializer):
 
 
 class SignupSerializer(serializers.ModelSerializer):
+    nickname = serializers.CharField(write_only=True, max_length=30)
     password = serializers.CharField(write_only=True, min_length=8)
     terms_agreed = serializers.BooleanField(write_only=True)
     privacy_agreed = serializers.BooleanField(write_only=True)
 
     class Meta:
         model = User
-        fields = ("email", "username", "password", "terms_agreed", "privacy_agreed")
+        fields = ("email", "nickname", "password", "terms_agreed", "privacy_agreed")
 
-    def validate_username(self, value):
-        username = (value or "").strip()
-        if not username:
+    def validate_nickname(self, value):
+        nickname = _normalize_text(value)
+        if not nickname:
             raise serializers.ValidationError("이름은 비워둘 수 없습니다.")
-        if User.objects.filter(username=username).exists():
+        if len(nickname) > 30:
+            raise serializers.ValidationError("닉네임은 30자 이하로 입력해주세요.")
+        if not re.fullmatch(NICKNAME_PATTERN, nickname):
+            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
+        if User.objects.filter(nickname=nickname).exists() or User.objects.filter(username=nickname).exists():
             raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
-        return username
+        return nickname
 
     def validate_email(self, value):
-        email = (value or "").strip().lower()
+        email = _normalize_text(value).lower()
+        if not email:
+            raise serializers.ValidationError("이메일은 비워둘 수 없습니다.")
         if User.objects.filter(email=email).exists():
             raise serializers.ValidationError("이미 사용 중인 이메일입니다.")
         return email
@@ -156,12 +193,12 @@ class SignupSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        username = validated_data["username"].strip()
+        nickname = validated_data["nickname"].strip()
         agreed_at = timezone.now()
         return User.objects.create_user(
-            username=username,
-            nickname=username,
-            display_name=username,
+            username=nickname,
+            nickname=nickname,
+            display_name=nickname,
             email=validated_data["email"],
             password=validated_data["password"],
             terms_agreed_at=agreed_at,
@@ -174,7 +211,7 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        email = (attrs.get("email") or "").strip().lower()
+        email = _normalize_text(attrs.get("email")).lower()
         password = attrs.get("password")
 
         user = User.objects.filter(email=email).first()
@@ -196,3 +233,27 @@ class LoginSerializer(serializers.Serializer):
 
         attrs["user"] = auth_user
         return attrs
+
+
+class NicknameAvailabilitySerializer(serializers.Serializer):
+    nickname = serializers.CharField(max_length=30)
+
+    def validate_nickname(self, value):
+        nickname = _normalize_text(value)
+        if not nickname:
+            raise serializers.ValidationError("닉네임을 입력해주세요.")
+        if not re.fullmatch(NICKNAME_PATTERN, nickname):
+            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
+        return nickname
+
+
+class DisplayNameAvailabilitySerializer(serializers.Serializer):
+    display_name = serializers.CharField(max_length=20)
+
+    def validate_display_name(self, value):
+        display_name = _normalize_text(value)
+        if not display_name:
+            raise serializers.ValidationError("표시명을 입력해주세요.")
+        if not re.fullmatch(DISPLAY_NAME_PATTERN, display_name):
+            raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
+        return display_name

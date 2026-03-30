@@ -4,7 +4,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 
 from ..models import User
-from ..serializers import MeSerializer, MeUpdateSerializer
+from ..serializers import (
+    DisplayNameAvailabilitySerializer,
+    MeSerializer,
+    MeUpdateSerializer,
+    NicknameAvailabilitySerializer,
+)
 
 
 # 내정보조회
@@ -40,26 +45,17 @@ class NicknameAvailabilityView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        nickname = (request.query_params.get("nickname") or "").strip()
-
-        if not nickname:
+        serializer = NicknameAvailabilitySerializer(data=request.query_params)
+        if not serializer.is_valid():
             return Response(
                 {
                     "available": False,
-                    "message": "닉네임을 입력해주세요.",
+                    "message": serializer.errors["nickname"][0],
                 },
                 status=status.HTTP_200_OK,
             )
 
-        if len(nickname) > 30:
-            return Response(
-                {
-                    "available": False,
-                    "message": "닉네임은 30자 이하로 입력해주세요.",
-                },
-                status=status.HTTP_200_OK,
-            )
-
+        nickname = serializer.validated_data["nickname"]
         exists = User.objects.filter(nickname=nickname).exists()
         return Response(
             {
@@ -74,26 +70,17 @@ class DisplayNameAvailabilityView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        display_name = (request.query_params.get("display_name") or "").strip()
-
-        if not display_name:
+        serializer = DisplayNameAvailabilitySerializer(data=request.query_params)
+        if not serializer.is_valid():
             return Response(
                 {
                     "available": False,
-                    "message": "표시명을 입력해주세요.",
+                    "message": serializer.errors["display_name"][0],
                 },
                 status=status.HTTP_200_OK,
             )
 
-        if len(display_name) > 50:
-            return Response(
-                {
-                    "available": False,
-                    "message": "표시명은 50자 이하로 입력해주세요.",
-                },
-                status=status.HTTP_200_OK,
-            )
-
+        display_name = serializer.validated_data["display_name"]
         exists = User.objects.filter(display_name=display_name).exclude(id=request.user.id).exists()
         return Response(
             {

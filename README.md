@@ -1,57 +1,135 @@
 # WATSON-BACKEND
 
-주소: http://127.0.0.1:8000/
-```
-docker compose up -d
-docker compose ps
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
-```
+로컬 기본 주소: `http://127.0.0.1:8000/`
 
-가상환경 세팅
+## 로컬 실행 순서
+
+### 1. 가상환경 / 의존성
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-마이그레이션
+### 2. 로컬 DB / Redis 실행
+현재 `docker-compose.yml`에는 `db`, `redis`만 있습니다.
+
+```bash
+docker compose up -d
+docker compose ps
 ```
+
+- Postgres: `127.0.0.1:5433`
+- Redis: `127.0.0.1:6379`
+
+### 3. 마이그레이션
+```bash
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py makemigrations
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py migrate
 ```
 
-실행
-```
+### 4. Django 서버 실행
+```bash
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
 ```
 
-슈퍼유저생성
+### 5. Celery 워커 실행
+AI 작업(등록 분석, 저작물 검증, 워터마크 삽입)은 Celery + Redis 큐로 처리됩니다.
+로컬 테스트 시 Django 서버와 별도로 워커를 반드시 띄워야 합니다.
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config worker -l info -Q ai,default
 ```
+
+### 6. 관리자 계정 생성
+```bash
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py createsuperuser
 ```
 
-의존성
-```
-pip freeze > requirements.txt
+## 한 번에 필요한 로컬 프로세스
+
+최소 실행 조합:
+
+1. `docker compose up -d`
+2. `DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver`
+3. `DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config worker -l info -Q ai,default`
+
+Celery 워커가 없으면 아래 기능은 응답이 `queued`에서 멈춥니다.
+
+- 저작물 등록 분석
+- 저작물 검증
+- 워터마크 삽입
+
+## 자주 쓰는 확인 명령
+
+### DB / Redis 상태 확인
+```bash
+docker compose ps
 ```
 
-
-앱 구조
-```
-	•	accounts : 회원가입, 로그인, OAuth, SMS 인증, 프로필, 권한
-
-	•	contents : 이미지/문서 원본 업로드, 상태 관리, 결과 파일
-	•	analysis : AI 판정 요청/응답, 유사도 결과, 후보 이미지, 판정 상태
-	•	reviews : REVIEW 상태 케이스, 투표, 투표 결과
-	•	tokens : NFT 발행, 토큰 메타데이터, 컨트랙트 연동 결과
-	•	wallets : 지갑 연동, 주소 저장, provider 정보
-
-	•	logs : 판정 로그, 액션 로그, 분쟁 대응 로그
-	•	common : 공통 base model, enum, validator, util
+### Redis 응답 확인
+```bash
+redis-cli -p 6379 ping
 ```
 
-redis 로컬
+### Celery 워커 큐 확인
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect active
+DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect reserved
 ```
-docker run -d --name verimarka-redis -p 6379:6379 redis:7-alpine
-redis-cli ping
+
+## 운영 compose
+
+운영은 별도 파일을 사용합니다.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
 ```
+
+## 운영 인증서 발급 / 갱신
+
+도메인 구성:
+
+- `verimarka.com` → 사용자용 웹사이트
+- `www.verimarka.com` → 사용자용 웹사이트
+- `admin.verimarka.com` → 관리자 웹사이트
+
+현재 nginx는 하나의 Let's Encrypt 인증서에 위 3개 도메인이 함께 포함된 SAN 인증서를 사용하도록 되어 있습니다.
+
+최초 발급 또는 `admin.verimarka.com` 추가 발급:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+  --webroot -w /var/www/certbot \
+  -d verimarka.com \
+  -d www.verimarka.com \
+  -d admin.verimarka.com
+```
+
+발급 후 nginx 재시작:
+
+```bash
+docker compose -f docker-compose.prod.yml restart verimarka-nginx
+```
+
+주의:
+
+- `admin.verimarka.com` DNS가 현재 서버를 가리켜야 합니다.
+- 80 포트가 외부에서 접근 가능해야 webroot 인증이 통과합니다.
+
+## 앱 구조
+```text
+accounts   : 회원가입, 로그인, OAuth, SMS 인증, 프로필, 권한
+contents   : 이미지 원본 업로드, 상태 관리, 결과 파일
+analysis   : AI 판정 요청/응답, 유사도 결과, 후보 이미지, 비동기 작업 큐
+reviews    : REVIEW 상태 케이스, 투표, 투표 결과
+tokens     : NFT 발행, 토큰 메타데이터, 컨트랙트 연동 결과
+wallets    : 지갑 연동, 주소 저장, provider 정보
+logs       : 판정 로그, 검증 이력, 분쟁 대응 로그
+```
+
+## 참고
+
+- dev 환경에서도 현재 구조상 S3 업로드를 전제로 동작하는 기능이 있습니다.
+- `verify`, `register`, `watermark`는 큐 기반이라 Redis + Celery가 빠지면 정상 동작하지 않습니다.
+- 의존성 변경 후에는 필요 시 `pip freeze > requirements.txt`로 반영합니다.

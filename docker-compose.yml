@@ -17,5 +17,15 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: watson-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - watson_redisdata:/data
+
 volumes:
   watson_pgdata:
+  watson_redisdata:
