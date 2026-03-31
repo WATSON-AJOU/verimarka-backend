@@ -364,6 +364,10 @@ class ContentBlockchainService:
                 status_code=500,
             )
 
+        integration_root_str = str(integration_root)
+        if integration_root_str not in sys.path:
+            sys.path.insert(0, integration_root_str)
+
         spec = importlib.util.spec_from_file_location("verimarka_blockchain_module", blockchain_path)
         if spec is None or spec.loader is None:
             raise AIIntegrationError(
