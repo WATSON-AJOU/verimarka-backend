@@ -56,7 +56,7 @@ class ContentRegisterViewTests(TestCase):
                 model="wam",
                 nbits=32,
                 scaling_w=2.0,
-                proportion_masked=0.35,
+                proportion_masked=0.65,
             ),
             timing_ms=GuardTimingV1(download=5, embed=10, ann_search=3, phash=1, total=19),
         )

@@ -71,7 +71,7 @@ class ContentWatermarkService:
                         "model": existing_watermark.get("model") or "wam",
                         "nbits": existing_watermark.get("nbits") or 32,
                         "scaling_w": existing_watermark.get("scaling_w") or 2.0,
-                        "proportion_masked": existing_watermark.get("proportion_masked") or 0.35,
+                        "proportion_masked": existing_watermark.get("proportion_masked") or 0.65,
                     },
                 }
             )

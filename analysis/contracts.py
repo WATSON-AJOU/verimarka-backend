@@ -27,7 +27,7 @@ class GuardWatermarkOptions(BaseModel):
     model: str | None = "wam"
     nbits: int | None = 32
     scaling_w: float | None = 2.0
-    proportion_masked: float = Field(default=0.35, ge=0.0, le=1.0)
+    proportion_masked: float = Field(default=0.65, ge=0.0, le=1.0)
 
 
 class GuardOptions(BaseModel):

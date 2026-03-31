@@ -67,15 +67,13 @@ class ContentBlockchainService:
         file_bytes = cls._load_watermarked_bytes(content)
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
-        token_uri = cls._build_token_uri(content)
         author_name = cls._resolve_author_name(content)
 
         try:
-            receipt = blockchain.mint_document(
+            receipt = blockchain.mint_document_with_metadata(
                 to=recipient_address,
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
-                token_uri=token_uri,
                 author_name=author_name,
                 is_suspicious=False,
             )
@@ -116,7 +114,7 @@ class ContentBlockchainService:
             "status": verification.get("status") or "Approved",
             "verification_link": verification.get("verification_link"),
             "author_name": verification.get("author_name") or author_name,
-            "token_uri": token_uri,
+            "token_uri": receipt.get("token_uri") or cls._build_token_uri(content),
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
             "block_number": receipt.get("block_number"),
@@ -152,7 +150,6 @@ class ContentBlockchainService:
         file_bytes = cls._load_original_bytes(content)
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
-        token_uri = cls._build_token_uri(content)
         author_name = cls._resolve_author_name(content)
         file_hash_hex = f"0x{file_hash_bytes.hex()}"
 
@@ -168,12 +165,11 @@ class ContentBlockchainService:
             file_hash_used = False
 
         logger.info(
-            "contents.blockchain.review_vote_start_prepare content_id=%s wm_id=%s file_hash=%s file_hash_used=%s token_uri=%s",
+            "contents.blockchain.review_vote_start_prepare content_id=%s wm_id=%s file_hash=%s file_hash_used=%s",
             content.public_id,
             wm_id,
             file_hash_hex,
             file_hash_used,
-            token_uri,
         )
 
         if file_hash_used:
@@ -186,11 +182,10 @@ class ContentBlockchainService:
             )
 
         try:
-            receipt = blockchain.mint_document(
+            receipt = blockchain.mint_document_with_metadata(
                 to=recipient_address,
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
-                token_uri=token_uri,
                 author_name=author_name,
                 is_suspicious=True,
             )
@@ -209,7 +204,7 @@ class ContentBlockchainService:
             "mint_kind": "review_vote",
             "recipient_address": recipient_address,
             "wm_id": wm_id,
-            "token_uri": token_uri,
+            "token_uri": receipt.get("token_uri") or cls._build_token_uri(content),
             "author_name": author_name,
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
