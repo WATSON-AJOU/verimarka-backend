@@ -162,6 +162,7 @@ class ContentVerificationService:
         token_id = verification.get("token_id")
         token_info = blockchain.get_document_info(token_id) if token_id else {}
         image_url = cls._resolve_content_image_url(content)
+        author_name = verification.get("author_name") or ((content.blockchain or {}).get("author_name") if content else None)
 
         return {
             "outcome": "verified",
@@ -188,6 +189,7 @@ class ContentVerificationService:
                 "owner_address": verification.get("owner"),
                 "status": verification.get("status"),
                 "verification_link": verification.get("verification_link"),
+                "author_name": author_name,
                 "network_name": ContentBlockchainService.NETWORK_NAME_BY_CHAIN_ID.get(
                     getattr(blockchain, "chain_id", None),
                     f"Chain {getattr(blockchain, 'chain_id', '')}".strip(),

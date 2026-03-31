@@ -68,6 +68,7 @@ class ContentBlockchainService:
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
         token_uri = cls._build_token_uri(content)
+        author_name = cls._resolve_author_name(content)
 
         try:
             receipt = blockchain.mint_document(
@@ -75,6 +76,7 @@ class ContentBlockchainService:
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
                 token_uri=token_uri,
+                author_name=author_name,
                 is_suspicious=False,
             )
             verification = blockchain.verify_document(wm_id)
@@ -113,6 +115,7 @@ class ContentBlockchainService:
             "token_id": verification.get("token_id"),
             "status": verification.get("status") or "Approved",
             "verification_link": verification.get("verification_link"),
+            "author_name": verification.get("author_name") or author_name,
             "token_uri": token_uri,
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
@@ -150,6 +153,7 @@ class ContentBlockchainService:
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
         token_uri = cls._build_token_uri(content)
+        author_name = cls._resolve_author_name(content)
         file_hash_hex = f"0x{file_hash_bytes.hex()}"
 
         try:
@@ -187,6 +191,7 @@ class ContentBlockchainService:
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
                 token_uri=token_uri,
+                author_name=author_name,
                 is_suspicious=True,
             )
         except Exception as exc:
@@ -205,6 +210,7 @@ class ContentBlockchainService:
             "recipient_address": recipient_address,
             "wm_id": wm_id,
             "token_uri": token_uri,
+            "author_name": author_name,
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
             "block_number": receipt.get("block_number"),
@@ -284,6 +290,7 @@ class ContentBlockchainService:
             "token_id": token_id,
             "status": verification.get("status") or status_name,
             "verification_link": verification.get("verification_link"),
+            "author_name": verification.get("author_name") or blockchain_data.get("author_name"),
             "token_uri": blockchain_data.get("token_uri") or cls._build_token_uri(content),
             "minted_at": blockchain_data.get("minted_at") or now.isoformat(),
             "minted_at_display": minted_at_display,
@@ -540,6 +547,19 @@ class ContentBlockchainService:
             retryable=False,
             status_code=400,
             job_id=str(content.public_id),
+        )
+
+    @classmethod
+    def _resolve_author_name(cls, content: Content) -> str:
+        owner = getattr(content, "owner", None)
+        if not owner:
+            return "사용자"
+        return (
+            getattr(owner, "display_name", "")
+            or getattr(owner, "nickname", "")
+            or getattr(owner, "username", "")
+            or getattr(owner, "email", "").split("@")[0]
+            or "사용자"
         )
 
     @classmethod
