@@ -89,14 +89,18 @@ class WalletSummaryView(APIView):
                 "chain_id": None,
                 "wallet_type": "",
                 "network_name": "Sepolia",
-                "nft_count": 0,
+                "nft_count": None,
                 "vote_minimum": VOTE_MINIMUM_NFT,
                 "vote_eligible": False,
+                "lookup_status": "not_connected",
+                "lookup_error": None,
             }
             return Response(WalletSummarySerializer(payload).data, status=status.HTTP_200_OK)
 
-        nft_count = 0
+        nft_count = None
         network_name = "Sepolia"
+        lookup_status = "ok"
+        lookup_error = None
         try:
             blockchain = ContentBlockchainService._create_client()
             nft_count = int(
@@ -116,6 +120,8 @@ class WalletSummaryView(APIView):
                 wallet_link.address,
                 exc,
             )
+            lookup_status = "failed"
+            lookup_error = "NFT 보유 수량을 조회하지 못했습니다. 잠시 후 다시 시도해주세요."
 
         payload = {
             "connected": True,
@@ -125,7 +131,9 @@ class WalletSummaryView(APIView):
             "network_name": network_name,
             "nft_count": nft_count,
             "vote_minimum": VOTE_MINIMUM_NFT,
-            "vote_eligible": nft_count >= VOTE_MINIMUM_NFT,
+            "vote_eligible": lookup_status == "ok" and nft_count is not None and nft_count >= VOTE_MINIMUM_NFT,
+            "lookup_status": lookup_status,
+            "lookup_error": lookup_error,
         }
         return Response(WalletSummarySerializer(payload).data, status=status.HTTP_200_OK)
 
