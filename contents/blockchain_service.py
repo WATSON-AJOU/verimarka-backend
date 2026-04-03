@@ -22,6 +22,7 @@ class ContentBlockchainService:
     _blockchain_class = None
     _vector_upsert_callable = None
     REVIEW_THRESHOLD = 0.75
+    REVIEW_VOTE_SIGNATURE_TTL_SECONDS = 10 * 60
 
     NETWORK_NAME_BY_CHAIN_ID = {
         11155111: "Sepolia",
@@ -328,6 +329,128 @@ class ContentBlockchainService:
         if content is None:
             return None
         return cls.sync_review_vote(content=content)
+
+    @classmethod
+    def get_review_vote_signing_context(cls, *, content: Content, voter_address: str) -> dict[str, Any]:
+        blockchain_data = content.blockchain or {}
+        if blockchain_data.get("mint_kind") != "review_vote":
+            raise AIIntegrationError(
+                error_code="INVALID_STATE",
+                error_message="서명 투표를 위한 리뷰 투표가 아직 생성되지 않았습니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            )
+
+        content = cls.sync_review_vote(content=content)
+        blockchain_data = content.blockchain or {}
+        vote_data = blockchain_data.get("vote") or {}
+        if vote_data.get("status") != "Pending":
+            raise AIIntegrationError(
+                error_code="VOTE_NOT_ACTIVE",
+                error_message="현재 진행 중인 투표가 아닙니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            )
+
+        token_id = blockchain_data.get("token_id")
+        if token_id is None:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_NOT_FOUND",
+                error_message="투표 대상 토큰 정보를 찾을 수 없습니다.",
+                retryable=False,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
+
+        blockchain = cls._create_client()
+        deadline = int(timezone.now().timestamp()) + cls.REVIEW_VOTE_SIGNATURE_TTL_SECONDS
+        nonce = int(blockchain.get_vote_nonce(voter_address))
+        domain = cls._json_safe(blockchain.get_eip712_domain())
+        token_id_int = int(token_id)
+
+        return {
+            "token_id": token_id_int,
+            "vote_id": vote_data.get("vote_id") or f"VOTE-{token_id_int}",
+            "voter": voter_address,
+            "nonce": nonce,
+            "deadline": deadline,
+            "domain": domain,
+            "types": {
+                "Vote": [
+                    {"name": "tokenId", "type": "uint256"},
+                    {"name": "isOriginal", "type": "bool"},
+                    {"name": "voter", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "deadline", "type": "uint256"},
+                ],
+            },
+            "primaryType": "Vote",
+        }
+
+    @classmethod
+    def submit_review_vote_signature(
+        cls,
+        *,
+        content: Content,
+        voter_address: str,
+        is_original: bool,
+        deadline: int,
+        signature: str,
+    ) -> tuple[Content, dict[str, Any]]:
+        blockchain_data = content.blockchain or {}
+        if blockchain_data.get("mint_kind") != "review_vote":
+            raise AIIntegrationError(
+                error_code="INVALID_STATE",
+                error_message="커뮤니티 검증 투표가 아직 생성되지 않았습니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            )
+
+        token_id = blockchain_data.get("token_id")
+        if token_id is None:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_NOT_FOUND",
+                error_message="투표 대상 토큰 정보를 찾을 수 없습니다.",
+                retryable=False,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
+
+        try:
+            signature_bytes = bytes.fromhex(signature.removeprefix("0x"))
+        except ValueError as exc:
+            raise AIIntegrationError(
+                error_code="INVALID_SIGNATURE_FORMAT",
+                error_message="서명 형식이 올바르지 않습니다.",
+                retryable=False,
+                status_code=400,
+                job_id=str(content.public_id),
+            ) from exc
+
+        blockchain = cls._create_client()
+
+        try:
+            receipt = blockchain.vote_with_signature(
+                token_id=int(token_id),
+                is_original=is_original,
+                voter_address=voter_address,
+                deadline=int(deadline),
+                signature=signature_bytes,
+            )
+        except Exception as exc:
+            raise AIIntegrationError(
+                error_code="BLOCKCHAIN_VOTE_CAST_FAIL",
+                error_message=str(exc) or "서명 기반 투표 처리에 실패했습니다.",
+                retryable=True,
+                status_code=400,
+                job_id=str(content.public_id),
+            ) from exc
+
+        synced_content = cls.sync_review_vote(content=content)
+        return synced_content, receipt
 
     @classmethod
     def _create_client(cls):

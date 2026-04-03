@@ -20,6 +20,7 @@ from analysis.tasks import run_register_analysis_job, run_verify_job, run_waterm
 from accounts.permissions import IsPhoneVerified, IsWalletLinked
 
 from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
+from .serializers import ReviewVoteSignatureSerializer
 from .services import ContentRegistrationService
 from .models import Content
 from .blockchain_service import ContentBlockchainService
@@ -473,6 +474,81 @@ class ContentReviewVoteStatusView(APIView):
             ((content.blockchain or {}).get("vote") or {}).get("status"),
         )
         return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class ContentReviewVoteSigningContextView(APIView):
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
+
+    def get(self, request, public_id):
+        content = get_object_or_404(Content.objects.select_related("owner", "owner__wallet_link"), public_id=public_id)
+        wallet_link = getattr(request.user, "wallet_link", None)
+        if wallet_link is None or not wallet_link.address:
+            return Response({"message": "지갑 연결이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payload = ContentBlockchainService.get_review_vote_signing_context(
+                content=content,
+                voter_address=wallet_link.address,
+            )
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.review_vote_signing.ai_error user_id=%s content_id=%s error_code=%s message=%s",
+                getattr(request.user, "id", None),
+                public_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ContentReviewVoteCastView(APIView):
+    permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
+
+    def post(self, request, public_id):
+        content = get_object_or_404(Content.objects.select_related("owner", "owner__wallet_link"), public_id=public_id)
+        wallet_link = getattr(request.user, "wallet_link", None)
+        if wallet_link is None or not wallet_link.address:
+            return Response({"message": "지갑 연결이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = ReviewVoteSignatureSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            content, receipt = ContentBlockchainService.submit_review_vote_signature(
+                content=content,
+                voter_address=wallet_link.address,
+                is_original=serializer.validated_data["is_original"],
+                deadline=serializer.validated_data["deadline"],
+                signature=serializer.validated_data["signature"],
+            )
+        except AIIntegrationError as exc:
+            logger.exception(
+                "contents.review_vote_cast.ai_error user_id=%s content_id=%s error_code=%s message=%s",
+                getattr(request.user, "id", None),
+                public_id,
+                exc.error_code,
+                exc.error_message,
+            )
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        logger.info(
+            "contents.review_vote_cast.success user_id=%s content_id=%s token_id=%s tx_hash=%s",
+            getattr(request.user, "id", None),
+            content.public_id,
+            (content.blockchain or {}).get("token_id"),
+            receipt.get("tx_hash"),
+        )
+        return Response(
+            {
+                "tx_hash": receipt.get("tx_hash"),
+                "block_number": receipt.get("block_number"),
+                "gas_used": receipt.get("gas_used"),
+                "content": ContentSerializer(content, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ContentReviewVoteEventSyncView(APIView):

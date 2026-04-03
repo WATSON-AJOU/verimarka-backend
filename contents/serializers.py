@@ -98,3 +98,17 @@ class ContentVerifySerializer(serializers.Serializer):
 
     def validate_file(self, value):
         return validate_uploaded_image_file(value)
+
+
+class ReviewVoteSignatureSerializer(serializers.Serializer):
+    is_original = serializers.BooleanField()
+    deadline = serializers.IntegerField(min_value=1)
+    signature = serializers.CharField()
+
+    def validate_signature(self, value: str) -> str:
+        signature = (value or "").strip()
+        if not signature:
+            raise serializers.ValidationError("지갑 서명이 필요합니다.")
+        if not signature.startswith("0x"):
+            raise serializers.ValidationError("서명 형식이 올바르지 않습니다.")
+        return signature
