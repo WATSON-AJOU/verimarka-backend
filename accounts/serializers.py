@@ -346,7 +346,7 @@ class AdminUserListSerializer(serializers.Serializer):
     nickname = serializers.CharField()
     role = serializers.CharField()
     verification = serializers.CharField()
-    nft_count = serializers.IntegerField()
+    nft_count = serializers.IntegerField(allow_null=True)
     joined_at = serializers.CharField()
     last_login = serializers.CharField()
     status = serializers.CharField()
@@ -364,7 +364,7 @@ class AdminUserDetailSerializer(serializers.Serializer):
     nickname = serializers.CharField()
     role = serializers.CharField()
     verification = serializers.CharField()
-    nft_count = serializers.IntegerField()
+    nft_count = serializers.IntegerField(allow_null=True)
     joined_at = serializers.CharField()
     last_login = serializers.CharField()
     status = serializers.CharField()
@@ -421,7 +421,7 @@ class AdminVoteParticipantSerializer(serializers.Serializer):
     email = serializers.CharField()
     wallet = serializers.CharField()
     choice = serializers.CharField()
-    nft_count = serializers.IntegerField()
+    nft_count = serializers.IntegerField(allow_null=True)
     voted_at = serializers.CharField()
 
 

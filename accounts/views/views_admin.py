@@ -6,8 +6,10 @@ from django.utils import timezone
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from web3 import Web3
 
 from analysis.models import AIJob
+from contents.blockchain_service import ContentBlockchainService
 from contents.models import Content
 from contents.serializers import ContentSerializer
 from contents.views import _build_content_preview_url
@@ -48,15 +50,20 @@ def _account_status_label(user: User) -> str:
     return "정상" if user.is_active and not user.is_deleted else "정지"
 
 
-def _user_nft_count(user: User) -> int:
-    return user.contents.filter(
-        blockchain__minted=True,
-        blockchain__mint_kind="content",
-    ).count()
+def _user_nft_count(user: User) -> int | None:
+    wallet_link = getattr(user, "wallet_link", None)
+    if not wallet_link or not wallet_link.address:
+        return None
+    try:
+        blockchain = ContentBlockchainService._create_client()
+        return int(blockchain.contract.functions.balanceOf(Web3.to_checksum_address(wallet_link.address)).call())
+    except Exception:
+        return None
 
 
 def _user_vote_permission(user: User) -> str:
-    return "활성" if _user_nft_count(user) >= 3 else "비활성"
+    nft_count = _user_nft_count(user)
+    return "활성" if nft_count is not None and nft_count >= 3 else "비활성"
 
 
 def _image_decision_label(content: Content) -> str:
