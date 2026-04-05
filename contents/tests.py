@@ -12,6 +12,7 @@ from analysis.contracts import (
     GuardTimingV1,
     GuardWatermarkResultV1,
 )
+from analysis.models import AIJob
 from .models import Content
 
 
@@ -140,3 +141,42 @@ class ContentRegisterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("확장자와 MIME", str(response.json()))
+
+    @patch("contents.views.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.services.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.services.S3StorageService.upload_file")
+    @patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
+    @patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_blocks_duplicate_source_after_success(
+        self,
+        mocked_delay,
+        *_mocks,
+    ):
+        mocked_delay.return_value.id = "celery-task-1"
+
+        first_upload = SimpleUploadedFile(
+            "sample.png",
+            b"\x89PNG\r\n\x1a\nsamecontent",
+            content_type="image/png",
+        )
+        first_response = self.client.post("/api/contents/register/", {"file": first_upload}, format="multipart")
+
+        self.assertEqual(first_response.status_code, 202)
+        first_content = Content.objects.get()
+        AIJob.objects.filter(content=first_content, job_type="register").update(status="success")
+
+        second_upload = SimpleUploadedFile(
+            "sample.png",
+            b"\x89PNG\r\n\x1a\nsamecontent",
+            content_type="image/png",
+        )
+        second_response = self.client.post("/api/contents/register/", {"file": second_upload}, format="multipart")
+
+        self.assertEqual(second_response.status_code, 200)
+        payload = second_response.json()
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["content"]["decision"], "block")
+        self.assertEqual(payload["content"]["status"], "block")
+        self.assertIn("동일한 원본 이미지", payload["content"]["reason"])
+        self.assertEqual(Content.objects.count(), 2)

@@ -58,3 +58,40 @@ class Content(models.Model):
 
     def __str__(self):
         return f"{self.original_filename} ({self.status})"
+
+
+class VoteParticipationLog(models.Model):
+    CHOICE_CHOICES = [
+        ("yes", "Yes"),
+        ("no", "No"),
+    ]
+
+    content = models.ForeignKey(
+        Content,
+        on_delete=models.CASCADE,
+        related_name="vote_participations",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="vote_participations",
+    )
+    wallet_address = models.CharField(max_length=42)
+    choice = models.CharField(max_length=10, choices=CHOICE_CHOICES)
+    tx_hash = models.CharField(max_length=100, blank=True)
+    token_id = models.PositiveBigIntegerField(null=True, blank=True)
+    signed_deadline = models.BigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["content", "user"],
+                name="uniq_vote_participation_content_user",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.content_id}:{self.user_id}:{self.choice}"

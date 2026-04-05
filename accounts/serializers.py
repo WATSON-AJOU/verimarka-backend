@@ -56,6 +56,61 @@ class MeSerializer(serializers.ModelSerializer):
         return wallet_link.wallet_type if wallet_link else ""
 
 
+class AdminMeSerializer(serializers.ModelSerializer):
+    last_login_at = serializers.DateTimeField(source="last_login", read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "nickname",
+            "display_name",
+            "email",
+            "last_login_at",
+            "is_staff",
+            "is_superuser",
+        )
+
+
+class AdminUserUpdateSerializer(serializers.Serializer):
+    ROLE_CHOICES = (
+        ("일반회원", "일반회원"),
+        ("관리자", "관리자"),
+    )
+    STATUS_CHOICES = (
+        ("정상", "정상"),
+        ("정지", "정지"),
+    )
+
+    role = serializers.ChoiceField(choices=ROLE_CHOICES, required=False)
+    status = serializers.ChoiceField(choices=STATUS_CHOICES, required=False)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("변경할 항목이 없습니다.")
+        return attrs
+
+    def update(self, instance, validated_data):
+        role = validated_data.get("role")
+        status = validated_data.get("status")
+        update_fields = []
+
+        if role is not None:
+            is_admin = role == "관리자"
+            instance.is_staff = is_admin
+            instance.is_superuser = is_admin
+            update_fields.extend(["is_staff", "is_superuser"])
+
+        if status is not None:
+            instance.is_active = status == "정상"
+            update_fields.append("is_active")
+
+        if update_fields:
+            instance.save(update_fields=update_fields)
+        return instance
+
+
 class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -235,6 +290,20 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
+class AdminLoginSerializer(LoginSerializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        user = attrs["user"]
+
+        if not (user.is_staff or user.is_superuser):
+            raise serializers.ValidationError(
+                "관리자 권한이 없는 계정입니다."
+            )
+
+        attrs["user"] = user
+        return attrs
+
+
 class NicknameAvailabilitySerializer(serializers.Serializer):
     nickname = serializers.CharField(max_length=30)
 
@@ -257,3 +326,117 @@ class DisplayNameAvailabilitySerializer(serializers.Serializer):
         if not re.fullmatch(DISPLAY_NAME_PATTERN, display_name):
             raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
         return display_name
+
+
+class AdminDashboardSerializer(serializers.Serializer):
+    total_users = serializers.IntegerField()
+    verified_users = serializers.IntegerField()
+    vote_eligible_users = serializers.IntegerField()
+    total_images = serializers.IntegerField()
+    images_uploaded_today = serializers.IntegerField()
+    active_votes = serializers.IntegerField()
+    closing_votes_today = serializers.IntegerField()
+    pending_jobs = serializers.IntegerField()
+    recent_feed = serializers.ListField(child=serializers.CharField())
+
+
+class AdminUserListSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.CharField()
+    nickname = serializers.CharField()
+    role = serializers.CharField()
+    verification = serializers.CharField()
+    nft_count = serializers.IntegerField()
+    joined_at = serializers.CharField()
+    last_login = serializers.CharField()
+    status = serializers.CharField()
+
+
+class AdminRecentActivitySerializer(serializers.Serializer):
+    title = serializers.CharField()
+    result = serializers.CharField()
+    date = serializers.CharField()
+
+
+class AdminUserDetailSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.CharField()
+    nickname = serializers.CharField()
+    role = serializers.CharField()
+    verification = serializers.CharField()
+    nft_count = serializers.IntegerField()
+    joined_at = serializers.CharField()
+    last_login = serializers.CharField()
+    status = serializers.CharField()
+    recent_ip = serializers.CharField(allow_blank=True)
+    wallet_address = serializers.CharField(allow_blank=True)
+    wallet_method = serializers.CharField(allow_blank=True)
+    wallet_linked_at = serializers.CharField(allow_blank=True)
+    vote_permission = serializers.CharField()
+    recent_activities = AdminRecentActivitySerializer(many=True)
+
+
+class AdminImageListSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    file_name = serializers.CharField()
+    uploader_email = serializers.CharField()
+    uploaded_at = serializers.CharField()
+    decision = serializers.CharField()
+    vote_status = serializers.CharField()
+    preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+
+
+class AdminImageDetailSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    file_name = serializers.CharField()
+    uploader_email = serializers.CharField()
+    uploaded_at = serializers.CharField()
+    decision = serializers.CharField()
+    preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+    watermark_preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+    embedding_similarity = serializers.FloatField(allow_null=True)
+    phash_similarity = serializers.FloatField(allow_null=True)
+    threshold_result = serializers.FloatField(allow_null=True)
+    linked_vote = serializers.DictField(required=False)
+    blockchain = serializers.DictField(required=False)
+
+
+class AdminVoteListSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    vote_id = serializers.CharField()
+    file_name = serializers.CharField()
+    uploader_email = serializers.CharField()
+    status = serializers.CharField()
+    start_date = serializers.CharField(allow_blank=True)
+    end_date = serializers.CharField(allow_blank=True)
+    yes_rate = serializers.FloatField()
+    no_rate = serializers.FloatField()
+    participant_count = serializers.IntegerField()
+    decision = serializers.CharField()
+    preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+
+
+class AdminVoteParticipantSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    email = serializers.CharField()
+    wallet = serializers.CharField()
+    choice = serializers.CharField()
+    nft_count = serializers.IntegerField()
+    voted_at = serializers.CharField()
+
+
+class AdminVoteDetailSerializer(serializers.Serializer):
+    public_id = serializers.CharField()
+    vote_id = serializers.CharField()
+    image_id = serializers.CharField()
+    file_name = serializers.CharField()
+    uploader_email = serializers.CharField()
+    status = serializers.CharField()
+    start_date = serializers.CharField(allow_blank=True)
+    end_date = serializers.CharField(allow_blank=True)
+    yes_rate = serializers.FloatField()
+    no_rate = serializers.FloatField()
+    participant_count = serializers.IntegerField()
+    decision = serializers.CharField()
+    preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+    voter_records = AdminVoteParticipantSerializer(many=True)

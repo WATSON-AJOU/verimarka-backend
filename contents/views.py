@@ -22,7 +22,7 @@ from accounts.permissions import IsPhoneVerified, IsWalletLinked
 from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
 from .serializers import ReviewVoteSignatureSerializer
 from .services import ContentRegistrationService
-from .models import Content
+from .models import Content, VoteParticipationLog
 from .blockchain_service import ContentBlockchainService
 from .verification_service import ContentVerificationService
 from .watermark_service import ContentWatermarkService
@@ -157,7 +157,7 @@ class ContentRegisterView(APIView):
                         .order_by("-created_at")
                         .first()
                     )
-                    if existing_job is not None and existing_job.status in {"queued", "running", "success"}:
+                    if existing_job is not None and existing_job.status in {"queued", "running"}:
                         logger.info(
                             "contents.register.idempotent_reuse user_id=%s content_id=%s job_id=%s source_sha256=%s",
                             getattr(request.user, "id", None),
@@ -166,6 +166,27 @@ class ContentRegisterView(APIView):
                             source_sha256,
                         )
                         return _build_async_job_response(existing_job, existing_content, request)
+
+                    duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
+                        user=request.user,
+                        upload=upload,
+                        source_sha256=source_sha256,
+                        existing_content=existing_content,
+                    )
+                    duplicate_job = AIJob.objects.create(
+                        owner=request.user,
+                        content=duplicate_content,
+                        job_type="register",
+                        status="success",
+                        request_payload={"duplicate_of": str(existing_content.public_id)},
+                        response_payload={"content_public_id": str(duplicate_content.public_id)},
+                    )
+                    return _build_async_job_response(
+                        duplicate_job,
+                        duplicate_content,
+                        request,
+                        status_code=status.HTTP_200_OK,
+                    )
 
                 content = ContentRegistrationService.create_pending_content(
                     user=request.user,
@@ -532,6 +553,18 @@ class ContentReviewVoteCastView(APIView):
                 exc.error_message,
             )
             return Response(exc.to_response().model_dump(), status=exc.status_code)
+
+        VoteParticipationLog.objects.update_or_create(
+            content=content,
+            user=request.user,
+            defaults={
+                "wallet_address": wallet_link.address,
+                "choice": "yes" if serializer.validated_data["is_original"] else "no",
+                "tx_hash": str(receipt.get("tx_hash") or receipt.get("transaction_hash") or ""),
+                "token_id": (content.blockchain or {}).get("token_id"),
+                "signed_deadline": serializer.validated_data["deadline"],
+            },
+        )
 
         logger.info(
             "contents.review_vote_cast.success user_id=%s content_id=%s token_id=%s tx_hash=%s",

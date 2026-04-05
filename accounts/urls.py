@@ -1,12 +1,29 @@
 from django.urls import path
 from .views.views import DisplayNameAvailabilityView, MeView, NicknameAvailabilityView, WithdrawView
+from .views.views_admin import (
+    AdminDashboardView,
+    AdminImageDetailView,
+    AdminImageListView,
+    AdminUserDetailView,
+    AdminUserListView,
+    AdminVoteDetailView,
+    AdminVoteListView,
+)
 from .views.views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
 from .views.views_sms import PhoneSendCodeView, PhoneVerifyCodeView
 from .views.views_email import EmailSendCodeView, EmailVerifyCodeView
-from .views.views_auth import SignupView, LoginView
+from .views.views_auth import AdminLoginView, AdminMeView, LoginView, SignupView
 
 urlpatterns = [
+    path("admin/dashboard/", AdminDashboardView.as_view(), name="admin_dashboard"),
+    path("admin/users/", AdminUserListView.as_view(), name="admin_user_list"),
+    path("admin/users/<int:user_id>/", AdminUserDetailView.as_view(), name="admin_user_detail"),
+    path("admin/images/", AdminImageListView.as_view(), name="admin_image_list"),
+    path("admin/images/<uuid:public_id>/", AdminImageDetailView.as_view(), name="admin_image_detail"),
+    path("admin/votes/", AdminVoteListView.as_view(), name="admin_vote_list"),
+    path("admin/votes/<uuid:public_id>/", AdminVoteDetailView.as_view(), name="admin_vote_detail"),
     path("me/", MeView.as_view(), name="me"),
+    path("admin/me/", AdminMeView.as_view(), name="admin_me"),
     path("withdraw/", WithdrawView.as_view(), name="withdraw"),
     path("nickname-availability/", NicknameAvailabilityView.as_view(), name="nickname_availability"),
     path("display-name-availability/", DisplayNameAvailabilityView.as_view(), name="display_name_availability"),
@@ -18,4 +35,5 @@ urlpatterns = [
     path("email/verify-code/", EmailVerifyCodeView.as_view(), name="email_verify_code"),
     path("signup/", SignupView.as_view(), name="signup"),
     path("login/", LoginView.as_view(), name="login"),
+    path("admin/login/", AdminLoginView.as_view(), name="admin_login"),
 ]

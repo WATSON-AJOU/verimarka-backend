@@ -80,6 +80,36 @@ class ContentRegistrationService:
         return content
 
     @classmethod
+    def create_blocked_duplicate_content(cls, *, user, upload, source_sha256: str, existing_content: Content) -> Content:
+        content = cls.create_pending_content(user=user, upload=upload, source_sha256=source_sha256)
+        content.status = "block"
+        content.decision = "block"
+        content.reason = (
+            f"동일한 원본 이미지가 이미 처리되었습니다. "
+            f"(기존 콘텐츠 ID: {existing_content.public_id})"
+        )
+        content.next_action = "none"
+        content.analyzed_at = timezone.now()
+        content.save(
+            update_fields=[
+                "status",
+                "decision",
+                "reason",
+                "next_action",
+                "analyzed_at",
+                "updated_at",
+            ]
+        )
+        logger.info(
+            "contents.register.duplicate_blocked content_id=%s existing_content_id=%s owner_id=%s source_sha256=%s",
+            content.public_id,
+            existing_content.public_id,
+            content.owner_id,
+            source_sha256,
+        )
+        return content
+
+    @classmethod
     def run_guard_for_content(cls, *, content: Content, user_id: int, source_input: dict[str, str]) -> Content:
         guard_request = GuardRequestV1(
             job_id=str(content.public_id),
