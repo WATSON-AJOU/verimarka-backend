@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from math import ceil
 
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
@@ -12,7 +13,9 @@ from analysis.models import AIJob
 from contents.blockchain_service import ContentBlockchainService
 from contents.models import Content
 from contents.serializers import ContentSerializer
+from contents.services import ContentRegistrationService
 from contents.views import _build_content_preview_url
+from logs.models import VerificationHistoryLog
 from ..models import User
 from ..serializers import (
     AdminDashboardSerializer,
@@ -75,6 +78,9 @@ def _vote_status_label(content: Content) -> str:
     vote = (content.blockchain or {}).get("vote") or {}
     if not vote:
         return "없음"
+    end_at = _vote_end_datetime(content)
+    if end_at is not None and timezone.now() >= end_at:
+        return "종료"
     return "진행중" if vote.get("status") == "Pending" else "종료"
 
 
@@ -99,12 +105,22 @@ def _vote_end_label(content: Content) -> str:
 
 
 def _vote_end_date(content: Content):
+    end_at = _vote_end_datetime(content)
+    if not end_at:
+        return None
+    return timezone.localtime(end_at).date()
+
+
+def _vote_end_datetime(content: Content):
     vote = (content.blockchain or {}).get("vote") or {}
     raw = vote.get("end_time")
     if not raw:
         return None
     if isinstance(raw, datetime):
-        return timezone.localtime(raw).date()
+        parsed = raw
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
     if isinstance(raw, str):
         normalized = raw.replace("Z", "+00:00")
         try:
@@ -113,7 +129,7 @@ def _vote_end_date(content: Content):
             return None
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
-        return timezone.localtime(parsed).date()
+        return parsed
     return None
 
 
@@ -130,14 +146,24 @@ def _vote_rates(content: Content) -> tuple[float, float]:
 def _content_preview_urls(content: Content, request) -> tuple[str | None, str | None]:
     serializer = ContentSerializer(content, context={"request": request})
     data = serializer.data
-    return _build_content_preview_url(request, content) or data.get("file_url"), data.get("watermark_file_url")
+    original_preview_url = data.get("file_url") or _build_content_preview_url(request, content)
+    watermark_preview_url = data.get("watermark_file_url")
+
+    # Older rows can miss one side of the image URL pair; fall back so the UI
+    # still renders an actual image instead of an empty placeholder.
+    if not original_preview_url and watermark_preview_url:
+        original_preview_url = watermark_preview_url
+    if not watermark_preview_url and (content.watermark or {}).get("applied"):
+        watermark_preview_url = original_preview_url
+
+    return original_preview_url, watermark_preview_url
 
 
 def _serialize_user_list_item(user: User) -> dict:
     return {
         "id": user.id,
         "email": user.email or "",
-        "nickname": user.nickname or user.username,
+        "nickname": user.display_name or user.nickname or user.username,
         "role": _role_label(user),
         "verification": _verification_label(user),
         "nft_count": _user_nft_count(user),
@@ -147,25 +173,123 @@ def _serialize_user_list_item(user: User) -> dict:
     }
 
 
-def _serialize_recent_activity(content: Content) -> dict:
+def _serialize_recent_content_activity(content: Content, request) -> list[dict]:
+    preview_url, _ = _content_preview_urls(content, request)
+    activities = [
+        {
+            "title": content.original_filename,
+            "result": _image_decision_label(content),
+            "date": _format_dt(content.created_at),
+            "preview_url": preview_url,
+            "image_public_id": str(content.public_id),
+            "detail_path": f"/images/{content.public_id}",
+            "detail_label": "이미지 상세",
+            "meta": "저작물 등록",
+            "sort_key": content.created_at,
+        }
+    ]
+    blockchain = content.blockchain or {}
+    if blockchain.get("minted") and blockchain.get("mint_kind") == "content":
+        minted_at_display = blockchain.get("minted_at")
+        minted_at = None
+        if isinstance(minted_at_display, str):
+            normalized = minted_at_display.replace("Z", "+00:00")
+            try:
+                minted_at = datetime.fromisoformat(normalized)
+            except ValueError:
+                minted_at = None
+        if minted_at and timezone.is_naive(minted_at):
+            minted_at = timezone.make_aware(minted_at, timezone.get_current_timezone())
+        sort_key = minted_at or content.updated_at
+        activities.append(
+            {
+                "title": content.original_filename,
+                "result": "MINTED",
+                "date": _format_dt(sort_key),
+                "preview_url": preview_url,
+                "image_public_id": str(content.public_id),
+                "detail_path": f"/images/{content.public_id}",
+                "detail_label": "이미지 상세",
+                "meta": f"토큰 발행 · #{blockchain.get('token_id') or '-'}",
+                "sort_key": sort_key,
+            }
+        )
+    return activities
+
+
+def _serialize_recent_verification_activity(log: VerificationHistoryLog) -> dict:
+    candidate = log.candidate or {}
     return {
-        "title": content.original_filename,
-        "result": _image_decision_label(content),
-        "date": _format_date(content.created_at),
+        "title": log.uploaded_file_name,
+        "result": "VERIFY" if log.outcome == "verified" else "CANDIDATE",
+        "date": _format_dt(log.created_at),
+        "preview_url": log.uploaded_preview_url or candidate.get("preview_url"),
+        "image_public_id": candidate.get("public_id") or "",
+        "detail_path": f"/images/{candidate.get('public_id')}" if candidate.get("public_id") else "",
+        "detail_label": "이미지 상세" if candidate.get("public_id") else "",
+        "meta": log.summary or ("워터마크 검증 성공" if log.outcome == "verified" else "유사 후보 탐색"),
+        "sort_key": log.created_at,
     }
 
 
-def _serialize_user_detail(user: User) -> dict:
+def _serialize_recent_vote_activity(item, request) -> dict:
+    preview_url, _ = _content_preview_urls(item.content, request)
+    return {
+        "title": item.content.original_filename,
+        "result": "VOTE",
+        "date": _format_dt(item.created_at),
+        "preview_url": preview_url,
+        "image_public_id": str(item.content.public_id),
+        "detail_path": f"/votes/{item.content.public_id}",
+        "detail_label": "투표 상세",
+        "meta": f"커뮤니티 투표 {'찬성' if item.choice == 'yes' else '반대'} 참여",
+        "sort_key": item.created_at,
+    }
+
+
+def _serialize_user_detail(user: User, request, activity_page: int = 1, activity_page_size: int = 10) -> dict:
     wallet_link = getattr(user, "wallet_link", None)
-    recent_contents = list(user.contents.all()[:5])
+    contents = list(user.contents.order_by("-created_at"))
+    verification_logs = list(user.verification_history_logs.all())
+    vote_logs = list(user.vote_participations.select_related("content").all())
+    all_recent_activities = []
+    for content in contents:
+        all_recent_activities.extend(_serialize_recent_content_activity(content, request))
+    all_recent_activities.extend(_serialize_recent_verification_activity(log) for log in verification_logs)
+    all_recent_activities.extend(_serialize_recent_vote_activity(item, request) for item in vote_logs)
+    all_recent_activities = sorted(all_recent_activities, key=lambda item: item["sort_key"], reverse=True)
+    total_count = len(all_recent_activities)
+    total_pages = max(1, ceil(total_count / activity_page_size)) if activity_page_size > 0 else 1
+    safe_page = min(max(activity_page, 1), total_pages)
+    start = (safe_page - 1) * activity_page_size
+    end = start + activity_page_size
+    recent_activities = all_recent_activities[start:end]
     return {
         **_serialize_user_list_item(user),
-        "recent_ip": "",
+        "recent_ip": user.last_login_ip or "",
+        "sms_verification": "완료" if user.phone_verified else "미인증",
+        "email_verification": "완료" if user.email_verified else "미인증",
         "wallet_address": wallet_link.address if wallet_link else "",
         "wallet_method": wallet_link.wallet_type if wallet_link else "",
         "wallet_linked_at": _format_date(wallet_link.verified_at) if wallet_link else "",
         "vote_permission": _user_vote_permission(user),
-        "recent_activities": [_serialize_recent_activity(content) for content in recent_contents],
+        "activity_page": safe_page,
+        "activity_page_size": activity_page_size,
+        "activity_total_count": total_count,
+        "activity_total_pages": total_pages,
+        "recent_activities": [
+            {
+                "title": item["title"],
+                "result": item["result"],
+                "date": item["date"],
+                "preview_url": item["preview_url"],
+                "image_public_id": item["image_public_id"],
+                "detail_path": item["detail_path"],
+                "detail_label": item["detail_label"],
+                "meta": item["meta"],
+            }
+            for item in recent_activities
+        ],
     }
 
 
@@ -186,6 +310,37 @@ def _serialize_image_detail(content: Content, request) -> dict:
     preview_url, watermark_preview_url = _content_preview_urls(content, request)
     blockchain = content.blockchain or {}
     vote = blockchain.get("vote") or {}
+    candidate = content.top_match or ((content.candidates or [None])[0] or {})
+    comparison_preview_url = watermark_preview_url
+    comparison_label = "워터마크 결과"
+    comparison_file_name = content.original_filename
+    comparison_public_id = ""
+    if _image_decision_label(content) in {"BLOCK", "REVIEW"}:
+        comparison_preview_url = candidate.get("preview_url")
+        comparison_label = "유사 후보"
+        comparison_db_key = candidate.get("db_key") or ""
+        comparison_file_name = candidate.get("db_file") or candidate.get("file_name") or "-"
+        comparison_public_id = candidate.get("public_id") or ""
+        if not comparison_preview_url and comparison_public_id:
+            candidate_content = Content.objects.filter(public_id=comparison_public_id).first()
+            if candidate_content:
+                comparison_preview_url, _ = _content_preview_urls(candidate_content, request)
+        if not comparison_preview_url and comparison_db_key:
+            candidate_content = ContentRegistrationService._find_content_by_db_key(comparison_db_key)
+            if candidate_content:
+                comparison_public_id = comparison_public_id or str(candidate_content.public_id)
+                comparison_file_name = comparison_file_name if comparison_file_name != "-" else candidate_content.original_filename
+                comparison_preview_url, _ = _content_preview_urls(candidate_content, request)
+        if not comparison_preview_url and comparison_file_name and comparison_file_name != "-":
+            candidate_content = (
+                Content.objects.filter(original_filename=comparison_file_name)
+                .exclude(pk=content.pk)
+                .order_by("-created_at")
+                .first()
+            )
+            if candidate_content:
+                comparison_public_id = comparison_public_id or str(candidate_content.public_id)
+                comparison_preview_url, _ = _content_preview_urls(candidate_content, request)
     return {
         "public_id": str(content.public_id),
         "file_name": content.original_filename,
@@ -194,6 +349,10 @@ def _serialize_image_detail(content: Content, request) -> dict:
         "decision": _image_decision_label(content),
         "preview_url": preview_url,
         "watermark_preview_url": watermark_preview_url,
+        "comparison_preview_url": comparison_preview_url,
+        "comparison_label": comparison_label,
+        "comparison_file_name": comparison_file_name,
+        "comparison_public_id": comparison_public_id,
         "embedding_similarity": round(float(content.top_cosine or 0) * 100, 1) if content.top_cosine is not None else None,
         "phash_similarity": float(content.top_phash_dist) if content.top_phash_dist is not None else None,
         "threshold_result": round(float(vote.get("threshold") or 0) * 100, 1) if vote.get("threshold") is not None else None,
@@ -270,8 +429,16 @@ class AdminDashboardView(APIView):
 
         recent_feed = []
         for content in Content.objects.select_related("owner").order_by("-updated_at")[:5]:
+            preview_url, _ = _content_preview_urls(content, request)
             recent_feed.append(
-                f"{_format_dt(content.updated_at)} · {content.owner.email or content.owner.username} · {content.original_filename} · {_image_decision_label(content)}"
+                {
+                    "date": _format_dt(content.updated_at),
+                    "email": content.owner.email or content.owner.username,
+                    "title": content.original_filename,
+                    "result": _image_decision_label(content),
+                    "preview_url": preview_url,
+                    "detail_path": f"/images/{content.public_id}",
+                }
             )
 
         payload = {
@@ -311,7 +478,16 @@ class AdminUserDetailView(APIView):
 
     def get(self, request, user_id: int):
         user = get_object_or_404(User.objects.select_related("wallet_link"), pk=user_id)
-        payload = _serialize_user_detail(user)
+        try:
+            activity_page = max(1, int(request.query_params.get("page", "1")))
+        except ValueError:
+            activity_page = 1
+        try:
+            activity_page_size = int(request.query_params.get("page_size", "10"))
+        except ValueError:
+            activity_page_size = 10
+        activity_page_size = min(max(activity_page_size, 1), 100)
+        payload = _serialize_user_detail(user, request, activity_page=activity_page, activity_page_size=activity_page_size)
         return Response(AdminUserDetailSerializer(payload).data)
 
     def patch(self, request, user_id: int):
@@ -319,7 +495,7 @@ class AdminUserDetailView(APIView):
         serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.update(user, serializer.validated_data)
-        payload = _serialize_user_detail(user)
+        payload = _serialize_user_detail(user, request)
         return Response(AdminUserDetailSerializer(payload).data)
 
 

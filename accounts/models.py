@@ -21,6 +21,7 @@ class User(AbstractUser):
     nickname = models.CharField(max_length=30, unique=True)
     display_name = models.CharField(max_length=50, blank=True)
     profile_image = models.URLField(blank=True, null=True)
+    last_login_ip = models.GenericIPAddressField(blank=True, null=True)
 
     auth_provider = models.CharField(
         max_length=20,
@@ -50,6 +51,7 @@ class User(AbstractUser):
         self.email_verified_at = None
         self.phone = None
         self.profile_image = None
+        self.last_login_ip = None
         self.display_name = "탈퇴한 회원"
         self.email = ""
         self.username = deleted_suffix[:150]
@@ -68,6 +70,7 @@ class User(AbstractUser):
                 "email_verified_at",
                 "phone",
                 "profile_image",
+                "last_login_ip",
                 "display_name",
                 "email",
                 "username",

@@ -46,6 +46,19 @@ def get_oauth_agreement_defaults() -> dict[str, timezone.datetime]:
     }
 
 
+def _get_client_ip(request) -> str | None:
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip() or None
+    return request.META.get("REMOTE_ADDR") or None
+
+
+def _record_social_login_success(request, user) -> None:
+    user.last_login = timezone.now()
+    user.last_login_ip = _get_client_ip(request)
+    user.save(update_fields=["last_login", "last_login_ip"])
+
+
 class GoogleOAuthLoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -99,9 +112,14 @@ class GoogleOAuthLoginView(APIView):
 
                 if social:
                     user = social.user
-                    if user.is_deleted or not user.is_active:
+                    if user.is_deleted:
                         return Response(
                             {"detail": "탈퇴한 계정입니다. 고객센터로 문의해주세요."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                    if not user.is_active:
+                        return Response(
+                            {"detail": "사용 정지된 계정입니다."},
                             status=status.HTTP_403_FORBIDDEN,
                         )
                     created = False
@@ -136,6 +154,7 @@ class GoogleOAuthLoginView(APIView):
                 social = SocialAccount.objects.get(provider="google", provider_sub=sub)
                 social.last_login_at = timezone.now()
                 social.save(update_fields=["last_login_at"])
+                _record_social_login_success(request, user)
 
         except IntegrityError:
             return Response(
@@ -208,9 +227,14 @@ class KakaoOAuthLoginView(APIView):
 
                 if social:
                     user = social.user
-                    if user.is_deleted or not user.is_active:
+                    if user.is_deleted:
                         return Response(
                             {"detail": "탈퇴한 계정입니다. 고객센터로 문의해주세요."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                    if not user.is_active:
+                        return Response(
+                            {"detail": "사용 정지된 계정입니다."},
                             status=status.HTTP_403_FORBIDDEN,
                         )
                     created = False
@@ -245,6 +269,7 @@ class KakaoOAuthLoginView(APIView):
                 social = SocialAccount.objects.get(provider="kakao", provider_sub=sub)
                 social.last_login_at = timezone.now()
                 social.save(update_fields=["last_login_at"])
+                _record_social_login_success(request, user)
 
         except IntegrityError:
             return Response(

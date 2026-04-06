@@ -80,8 +80,25 @@ class ContentRegistrationService:
         return content
 
     @classmethod
-    def create_blocked_duplicate_content(cls, *, user, upload, source_sha256: str, existing_content: Content) -> Content:
+    def create_blocked_duplicate_content(
+        cls,
+        *,
+        user,
+        upload,
+        source_sha256: str,
+        existing_content: Content,
+        temp_path: Path | None = None,
+    ) -> Content:
         content = cls.create_pending_content(user=user, upload=upload, source_sha256=source_sha256)
+        if temp_path is not None:
+            try:
+                cls._build_source_input(content, temp_path=temp_path)
+            except Exception:
+                logger.exception(
+                    "contents.register.duplicate_blocked.source_input_failed content_id=%s owner_id=%s",
+                    content.public_id,
+                    content.owner_id,
+                )
         content.status = "block"
         content.decision = "block"
         content.reason = (
@@ -89,6 +106,18 @@ class ContentRegistrationService:
             f"(기존 콘텐츠 ID: {existing_content.public_id})"
         )
         content.next_action = "none"
+        content.top_cosine = 1.0
+        content.top_phash_dist = 0
+        content.top_match = {
+            "public_id": str(existing_content.public_id),
+            "db_file": existing_content.original_filename,
+            "file_name": existing_content.original_filename,
+            "preview_url": cls._resolve_content_image_url(existing_content),
+            "owner_name": cls._resolve_owner_name(existing_content),
+            "registered_at": timezone.localtime(existing_content.created_at).strftime("%Y.%m.%d %H:%M"),
+            "summary": "동일 원본 이미지가 기존 등록 기록과 일치합니다.",
+        }
+        content.candidates = [content.top_match]
         content.analyzed_at = timezone.now()
         content.save(
             update_fields=[
@@ -96,6 +125,10 @@ class ContentRegistrationService:
                 "decision",
                 "reason",
                 "next_action",
+                "top_cosine",
+                "top_phash_dist",
+                "top_match",
+                "candidates",
                 "analyzed_at",
                 "updated_at",
             ]

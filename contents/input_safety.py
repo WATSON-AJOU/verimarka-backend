@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 from rest_framework import serializers
+from django.utils import timezone
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {
@@ -36,6 +37,8 @@ def sanitize_uploaded_filename(name: str, *, mime_type: str | None = None) -> st
     stem = Path(basename).stem
     stem = _SAFE_FILE_STEM_RE.sub("_", stem)
     stem = _MULTISPACE_RE.sub(" ", stem).strip(" ._")
+    if stem.lower() in {"image", "images"}:
+        stem = timezone.localtime().strftime("upload_%Y%m%d_%H%M%S")
     if not stem:
         stem = "image"
 

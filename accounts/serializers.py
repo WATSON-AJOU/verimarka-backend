@@ -38,6 +38,8 @@ class MeSerializer(serializers.ModelSerializer):
             "wallet_address",
             "wallet_chain_id",
             "wallet_type",
+            "is_staff",
+            "is_superuser",
         )
 
     def get_providers(self, obj):
@@ -275,9 +277,13 @@ class LoginSerializer(serializers.Serializer):
                 "이메일 또는 비밀번호가 올바르지 않습니다."
             )
 
-        if user.is_deleted or not user.is_active:
+        if user.is_deleted:
             raise serializers.ValidationError(
                 "탈퇴한 계정입니다. 고객센터로 문의해주세요."
+            )
+        if not user.is_active:
+            raise serializers.ValidationError(
+                "사용 정지된 계정입니다."
             )
 
         auth_user = authenticate(username=user.username, password=password)
@@ -328,6 +334,15 @@ class DisplayNameAvailabilitySerializer(serializers.Serializer):
         return display_name
 
 
+class AdminDashboardFeedItemSerializer(serializers.Serializer):
+    date = serializers.CharField()
+    email = serializers.CharField()
+    title = serializers.CharField()
+    result = serializers.CharField()
+    preview_url = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    detail_path = serializers.CharField(allow_blank=True, required=False)
+
+
 class AdminDashboardSerializer(serializers.Serializer):
     total_users = serializers.IntegerField()
     verified_users = serializers.IntegerField()
@@ -337,7 +352,7 @@ class AdminDashboardSerializer(serializers.Serializer):
     active_votes = serializers.IntegerField()
     closing_votes_today = serializers.IntegerField()
     pending_jobs = serializers.IntegerField()
-    recent_feed = serializers.ListField(child=serializers.CharField())
+    recent_feed = AdminDashboardFeedItemSerializer(many=True)
 
 
 class AdminUserListSerializer(serializers.Serializer):
@@ -356,6 +371,11 @@ class AdminRecentActivitySerializer(serializers.Serializer):
     title = serializers.CharField()
     result = serializers.CharField()
     date = serializers.CharField()
+    preview_url = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    image_public_id = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    detail_path = serializers.CharField(allow_blank=True, required=False)
+    detail_label = serializers.CharField(allow_blank=True, required=False)
+    meta = serializers.CharField(allow_blank=True, required=False)
 
 
 class AdminUserDetailSerializer(serializers.Serializer):
@@ -373,6 +393,10 @@ class AdminUserDetailSerializer(serializers.Serializer):
     wallet_method = serializers.CharField(allow_blank=True)
     wallet_linked_at = serializers.CharField(allow_blank=True)
     vote_permission = serializers.CharField()
+    activity_page = serializers.IntegerField()
+    activity_page_size = serializers.IntegerField()
+    activity_total_count = serializers.IntegerField()
+    activity_total_pages = serializers.IntegerField()
     recent_activities = AdminRecentActivitySerializer(many=True)
 
 
@@ -394,6 +418,10 @@ class AdminImageDetailSerializer(serializers.Serializer):
     decision = serializers.CharField()
     preview_url = serializers.CharField(allow_null=True, allow_blank=True)
     watermark_preview_url = serializers.CharField(allow_null=True, allow_blank=True)
+    comparison_preview_url = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    comparison_label = serializers.CharField(required=False)
+    comparison_file_name = serializers.CharField(allow_blank=True, required=False)
+    comparison_public_id = serializers.CharField(allow_blank=True, required=False)
     embedding_similarity = serializers.FloatField(allow_null=True)
     phash_similarity = serializers.FloatField(allow_null=True)
     threshold_result = serializers.FloatField(allow_null=True)

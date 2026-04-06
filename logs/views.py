@@ -9,6 +9,7 @@ import re
 from contents.serializers import ContentSerializer
 from contents.models import Content
 from contents.views import _build_content_preview_url, _format_review_vote_summary
+from contents.services import ContentRegistrationService
 
 from .models import VerificationHistoryLog
 
@@ -41,6 +42,56 @@ def _extract_metric_fallback(reason):
     cosine = float(cosine_match.group(1)) if cosine_match else None
     phash = int(phash_match.group(1)) if phash_match else None
     return cosine, phash
+
+
+def _content_image_urls(content: Content, request) -> tuple[str | None, str | None]:
+    serialized = ContentSerializer(content, context={"request": request}).data
+    original_preview_url = serialized.get("file_url") or _build_content_preview_url(request, content)
+    watermark_preview_url = serialized.get("watermark_file_url")
+    if not original_preview_url and watermark_preview_url:
+        original_preview_url = watermark_preview_url
+    if not watermark_preview_url and (content.watermark or {}).get("applied"):
+        watermark_preview_url = original_preview_url
+    return original_preview_url, watermark_preview_url
+
+
+def _resolve_history_candidate(content: Content, request) -> tuple[str | None, str, str, str]:
+    candidate = content.top_match or ((content.candidates or [None])[0] or {})
+    comparison_preview_url = candidate.get("preview_url")
+    comparison_file_name = candidate.get("db_file") or candidate.get("file_name") or "-"
+    comparison_public_id = candidate.get("public_id") or ""
+    comparison_db_key = candidate.get("db_key") or ""
+
+    if not comparison_preview_url and comparison_public_id:
+        candidate_content = Content.objects.filter(public_id=comparison_public_id).first()
+        if candidate_content:
+            comparison_public_id = str(candidate_content.public_id)
+            comparison_file_name = (
+                comparison_file_name if comparison_file_name != "-" else candidate_content.original_filename
+            )
+            comparison_preview_url, _ = _content_image_urls(candidate_content, request)
+
+    if not comparison_preview_url and comparison_db_key:
+        candidate_content = ContentRegistrationService._find_content_by_db_key(comparison_db_key)
+        if candidate_content:
+            comparison_public_id = comparison_public_id or str(candidate_content.public_id)
+            comparison_file_name = (
+                comparison_file_name if comparison_file_name != "-" else candidate_content.original_filename
+            )
+            comparison_preview_url, _ = _content_image_urls(candidate_content, request)
+
+    if not comparison_preview_url and comparison_file_name and comparison_file_name != "-":
+        candidate_content = (
+            Content.objects.filter(original_filename=comparison_file_name)
+            .exclude(pk=content.pk)
+            .order_by("-created_at")
+            .first()
+        )
+        if candidate_content:
+            comparison_public_id = comparison_public_id or str(candidate_content.public_id)
+            comparison_preview_url, _ = _content_image_urls(candidate_content, request)
+
+    return comparison_preview_url, comparison_file_name, comparison_public_id, candidate.get("summary") or ""
 
 
 def _is_review_vote_closed(vote):
@@ -92,6 +143,11 @@ class AnalysisHistoryView(APIView):
                     "phash": item["phash"],
                     "extra": item["extra"],
                     "preview_url": item["preview_url"],
+                    "original_preview_url": item.get("original_preview_url"),
+                    "comparison_preview_url": item.get("comparison_preview_url"),
+                    "comparison_file_name": item.get("comparison_file_name"),
+                    "comparison_public_id": item.get("comparison_public_id"),
+                    "comparison_label": item.get("comparison_label"),
                     "blockchain": item.get("blockchain"),
                     "download_url": item.get("download_url"),
                 }
@@ -100,13 +156,17 @@ class AnalysisHistoryView(APIView):
         )
 
     def _serialize_content(self, content: Content, request):
-        serialized = ContentSerializer(content, context={"request": request}).data
         vote = (content.blockchain or {}).get("vote") or {}
         minted = (content.blockchain or {}).get("minted")
         token_id = (content.blockchain or {}).get("token_id")
         fallback_cosine, fallback_phash = _extract_metric_fallback(content.reason)
         top_cosine = content.top_cosine if content.top_cosine is not None else fallback_cosine
         top_phash = content.top_phash_dist if content.top_phash_dist is not None else fallback_phash
+        original_preview_url, watermark_preview_url = _content_image_urls(content, request)
+        comparison_preview_url = None
+        comparison_file_name = ""
+        comparison_public_id = ""
+        comparison_label = ""
 
         if content.decision == "allow":
             summary = (
@@ -119,13 +179,20 @@ class AnalysisHistoryView(APIView):
                 if token_id
                 else "등록 승인됨"
             )
+            comparison_preview_url = watermark_preview_url
+            comparison_file_name = ""
+            comparison_label = "워터마크 삽입본"
         elif content.decision == "review":
             end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
             summary = "종료된 투표" if _is_review_vote_closed(vote) else "투표 진행 중"
             extra = f"마감 {end_time} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}"
+            comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
+            comparison_label = "유사 후보"
         else:
             summary = "유사도 초과로 등록 차단"
             extra = content.reason or "중복 가능성 높음"
+            comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
+            comparison_label = "유사 후보"
 
         return {
             "id": str(content.public_id),
@@ -136,7 +203,12 @@ class AnalysisHistoryView(APIView):
             "cosine": _format_cosine(top_cosine),
             "phash": _format_phash(top_phash),
             "extra": extra,
-            "preview_url": serialized.get("watermark_file_url") or serialized.get("file_url"),
+            "preview_url": watermark_preview_url or original_preview_url,
+            "original_preview_url": original_preview_url,
+            "comparison_preview_url": comparison_preview_url,
+            "comparison_file_name": comparison_file_name,
+            "comparison_public_id": comparison_public_id,
+            "comparison_label": comparison_label,
             "download_url": (
                 reverse("content_watermark_download", kwargs={"public_id": content.public_id})
                 if content.decision == "allow" and (content.watermark or {}).get("applied")
@@ -181,7 +253,7 @@ class PublicRecentActivityView(APIView):
         content_items = [self._serialize_content(item, request) for item in Content.objects.select_related("owner").all()[:100]]
         verify_items = [self._serialize_verification(item) for item in VerificationHistoryLog.objects.select_related("user").all()[:100]]
 
-        merged = sorted(content_items + verify_items, key=lambda item: item["sort_key"], reverse=True)[:3]
+        merged = sorted(content_items + verify_items, key=lambda item: item["sort_key"], reverse=True)[:6]
         return Response(
             [
                 {

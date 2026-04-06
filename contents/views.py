@@ -145,12 +145,12 @@ class ContentRegisterView(APIView):
         try:
             temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
             try:
-                existing_content = (
+                matching_contents = list(
                     Content.objects.filter(owner=request.user, source_sha256=source_sha256)
                     .exclude(status="failed")
                     .order_by("-updated_at")
-                    .first()
                 )
+                existing_content = matching_contents[0] if matching_contents else None
                 if existing_content is not None:
                     existing_job = (
                         AIJob.objects.filter(content=existing_content, owner=request.user, job_type="register")
@@ -167,26 +167,48 @@ class ContentRegisterView(APIView):
                         )
                         return _build_async_job_response(existing_job, existing_content, request)
 
-                    duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
-                        user=request.user,
-                        upload=upload,
-                        source_sha256=source_sha256,
-                        existing_content=existing_content,
+                    blocked_duplicate_source = next(
+                        (
+                            item
+                            for item in matching_contents
+                            if (
+                                (
+                                    bool((item.blockchain or {}).get("minted"))
+                                    and (item.blockchain or {}).get("mint_kind") == "content"
+                                )
+                                or (
+                                    bool((item.watermark or {}).get("applied"))
+                                    and (
+                                        (item.watermark or {}).get("output_key")
+                                        or (item.watermark or {}).get("output_url")
+                                    )
+                                )
+                            )
+                        ),
+                        None,
                     )
-                    duplicate_job = AIJob.objects.create(
-                        owner=request.user,
-                        content=duplicate_content,
-                        job_type="register",
-                        status="success",
-                        request_payload={"duplicate_of": str(existing_content.public_id)},
-                        response_payload={"content_public_id": str(duplicate_content.public_id)},
-                    )
-                    return _build_async_job_response(
-                        duplicate_job,
-                        duplicate_content,
-                        request,
-                        status_code=status.HTTP_200_OK,
-                    )
+                    if blocked_duplicate_source is not None:
+                        duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
+                            user=request.user,
+                            upload=upload,
+                            source_sha256=source_sha256,
+                            existing_content=blocked_duplicate_source,
+                            temp_path=temp_path,
+                        )
+                        duplicate_job = AIJob.objects.create(
+                            owner=request.user,
+                            content=duplicate_content,
+                            job_type="register",
+                            status="success",
+                            request_payload={"duplicate_of": str(blocked_duplicate_source.public_id)},
+                            response_payload={"content_public_id": str(duplicate_content.public_id)},
+                        )
+                        return _build_async_job_response(
+                            duplicate_job,
+                            duplicate_content,
+                            request,
+                            status_code=status.HTTP_200_OK,
+                        )
 
                 content = ContentRegistrationService.create_pending_content(
                     user=request.user,

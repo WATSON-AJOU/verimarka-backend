@@ -233,6 +233,7 @@ class ContentVerificationService:
         candidate_owner = None
         candidate_registered_at = None
         candidate_file_name = None
+        candidate_public_id = None
 
         if candidate_content:
             candidate_owner = (
@@ -243,6 +244,7 @@ class ContentVerificationService:
             )
             candidate_registered_at = timezone.localtime(candidate_content.created_at).strftime("%Y.%m.%d %H:%M")
             candidate_file_name = candidate_content.original_filename
+            candidate_public_id = str(candidate_content.public_id)
 
         logger.info(
             "contents.verify.fallback_guard_response user_id=%s job_id=%s decision=%s top_match=%s selected_match=%s preview_url=%s",
@@ -272,6 +274,7 @@ class ContentVerificationService:
             },
             "candidate": {
                 "preview_url": candidate_preview_url,
+                "public_id": candidate_public_id,
                 "file_name": candidate_file_name or selected_match.get("db_file"),
                 "owner_name": candidate_owner or "-",
                 "registered_at": candidate_registered_at or "-",
