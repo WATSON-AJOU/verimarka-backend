@@ -44,6 +44,11 @@ def _extract_metric_fallback(reason):
     return cosine, phash
 
 
+def _is_exact_duplicate_block(content: Content) -> bool:
+    reason = (content.reason or "").strip()
+    return reason.startswith("동일한 원본 이미지가 이미 처리되었습니다.")
+
+
 def _content_image_urls(content: Content, request) -> tuple[str | None, str | None]:
     serialized = ContentSerializer(content, context={"request": request}).data
     original_preview_url = serialized.get("file_url") or _build_content_preview_url(request, content)
@@ -189,7 +194,11 @@ class AnalysisHistoryView(APIView):
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
             comparison_label = "유사 후보"
         else:
-            summary = "유사도 초과로 등록 차단"
+            summary = (
+                "동일한 저작물 재업로드로 차단"
+                if _is_exact_duplicate_block(content)
+                else "유사도 초과로 등록 차단"
+            )
             extra = content.reason or "중복 가능성 높음"
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
             comparison_label = "유사 후보"
@@ -295,7 +304,11 @@ class PublicRecentActivityView(APIView):
             tone = "review"
         else:
             cosine = f"{content.top_cosine * 100:.1f}%" if content.top_cosine is not None else None
-            description = f"유사도 {cosine}로 등록 차단" if cosine else "유사도 초과로 등록 차단"
+            description = (
+                "동일한 저작물 재업로드로 차단"
+                if _is_exact_duplicate_block(content)
+                else (f"유사도 {cosine}로 등록 차단" if cosine else "유사도 초과로 등록 차단")
+            )
             progress = None
             status = "BLOCK"
             tone = "block"
