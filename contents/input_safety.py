@@ -15,7 +15,7 @@ _MULTISPACE_RE = re.compile(r"\s+")
 _SAFE_FILE_STEM_RE = re.compile(r"[^0-9A-Za-z가-힣._()\- ]+")
 
 
-def sanitize_uploaded_filename(name: str, *, mime_type: str | None = None) -> str:
+def normalize_uploaded_filename(name: str, *, mime_type: str | None = None) -> str:
     raw_name = (name or "").strip().replace("\\", "/")
     basename = raw_name.rsplit("/", 1)[-1]
     basename = _CONTROL_CHARS_RE.sub("", basename)
@@ -34,6 +34,18 @@ def sanitize_uploaded_filename(name: str, *, mime_type: str | None = None) -> st
     if allowed_extensions and extension not in allowed_extensions:
         raise serializers.ValidationError("파일 확장자와 MIME 타입이 일치하지 않습니다.")
 
+    stem = Path(basename).stem.strip()
+    if not stem:
+        raise serializers.ValidationError("파일명이 올바르지 않습니다.")
+
+    max_stem_length = 120 - len(extension)
+    display_stem = stem[:max_stem_length].rstrip(" .") or "image"
+    return f"{display_stem}{extension}"
+
+
+def sanitize_uploaded_filename(name: str, *, mime_type: str | None = None) -> str:
+    basename = normalize_uploaded_filename(name, mime_type=mime_type)
+    extension = Path(basename).suffix.lower()
     stem = Path(basename).stem
     stem = _SAFE_FILE_STEM_RE.sub("_", stem)
     stem = _MULTISPACE_RE.sub(" ", stem).strip(" ._")
@@ -58,6 +70,5 @@ def validate_uploaded_image_file(upload):
     if file_size > MAX_IMAGE_BYTES:
         raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
 
-    safe_name = sanitize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
-    upload.name = safe_name
+    normalize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
     return upload

@@ -11,7 +11,7 @@ from analysis.services import AIIntegrationError, AnalysisGuardService
 from analysis.watermark_services import WatermarkAIService
 
 from .blockchain_service import ContentBlockchainService
-from .input_safety import sanitize_uploaded_filename
+from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
 from .models import Content
 from .services import ContentRegistrationService
 from .storage import S3StorageService
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ContentVerificationService:
     @classmethod
     def verify_image(cls, *, user, upload) -> dict:
-        upload.name = sanitize_uploaded_filename(
+        upload_name = normalize_uploaded_filename(
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
         )
@@ -31,7 +31,7 @@ class ContentVerificationService:
             source_input = cls._build_source_input(temp_path=temp_path, upload=upload)
             return cls.verify_from_source_input(
                 user=user,
-                upload_name=upload.name,
+                upload_name=upload_name,
                 upload_size=upload.size,
                 upload_content_type=getattr(upload, "content_type", "") or "application/octet-stream",
                 source_input=source_input,
@@ -54,7 +54,7 @@ class ContentVerificationService:
         source_input: dict[str, str],
         temp_path: Path | None = None,
     ) -> dict:
-        upload_name = sanitize_uploaded_filename(upload_name, mime_type=upload_content_type)
+        upload_name = normalize_uploaded_filename(upload_name, mime_type=upload_content_type)
         verify_job_id = f"verify-{timezone.now().timestamp()}"
         logger.info(
             "contents.verify.detect_request user_id=%s job_id=%s source_input=%s",
@@ -317,7 +317,6 @@ class ContentVerificationService:
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
         )
-        upload.name = safe_name
         suffix = Path(safe_name).suffix or ".png"
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         with temp_file as f:
@@ -331,7 +330,6 @@ class ContentVerificationService:
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
         )
-        upload.name = safe_name
         if not S3StorageService.is_enabled():
             return {"url": str(temp_path.resolve())}
 

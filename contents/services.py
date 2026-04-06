@@ -10,7 +10,7 @@ from django.utils import timezone
 from analysis.contracts import GuardRequestV1
 from analysis.services import AnalysisGuardService
 
-from .input_safety import sanitize_uploaded_filename
+from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
 from .models import Content
 from .storage import S3StorageService
 
@@ -24,7 +24,6 @@ class ContentRegistrationService:
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
         )
-        upload.name = safe_name
         suffix = Path(safe_name).suffix or ".bin"
         digest = sha256()
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -53,17 +52,16 @@ class ContentRegistrationService:
 
     @classmethod
     def create_pending_content(cls, *, user, upload, source_sha256: str = "") -> Content:
-        safe_filename = sanitize_uploaded_filename(
+        display_filename = normalize_uploaded_filename(
             getattr(upload, "name", ""),
             mime_type=getattr(upload, "content_type", "") or None,
         )
-        upload.name = safe_filename
         content = Content.objects.create(
             owner=user,
             content_type="image",
             status="pending",
             original_file="",
-            original_filename=safe_filename,
+            original_filename=display_filename,
             source_sha256=source_sha256,
             mime_type=(getattr(upload, "content_type", "") or "application/octet-stream"),
             file_size=upload.size,
