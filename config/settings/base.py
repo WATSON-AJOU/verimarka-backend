@@ -135,6 +135,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "EXCEPTION_HANDLER": "config.exceptions.verimarka_exception_handler",
 }
 
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")

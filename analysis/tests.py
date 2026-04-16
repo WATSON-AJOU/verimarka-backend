@@ -11,6 +11,7 @@ from .contracts import (
     GuardTimingV1,
     GuardWatermarkResultV1,
 )
+from .services import AIIntegrationError
 
 
 User = get_user_model()
@@ -111,3 +112,52 @@ class GuardAnalyzeViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error_code"], "INVALID_INPUT")
+
+    @patch("analysis.views.AnalysisGuardService.run_guard_v1")
+    def test_guard_endpoint_formats_ai_integration_error(self, mocked_run_guard):
+        mocked_run_guard.side_effect = AIIntegrationError(
+            error_code="AI_TIMEOUT",
+            error_message="AI 처리 시간이 초과되었습니다.",
+            retryable=True,
+            status_code=503,
+            job_id="job-timeout",
+        )
+
+        response = self.client.post(
+            "/api/analysis/guard/",
+            {
+                "job_id": "job-timeout",
+                "mode": "register",
+                "content_type": "image",
+                "input": [{"url": "file:///tmp/sample.png"}],
+                "meta": {"user_id": "u1", "content_id": "c1"},
+                "options": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error_code"], "AI_TIMEOUT")
+        self.assertEqual(response.json()["detail"], "AI 처리 시간이 초과되었습니다.")
+        self.assertTrue(response.json()["retryable"])
+
+    @patch("analysis.views.AnalysisGuardService.run_guard_v1")
+    def test_guard_endpoint_formats_unhandled_exception_as_json(self, mocked_run_guard):
+        mocked_run_guard.side_effect = RuntimeError("unexpected boom")
+
+        response = self.client.post(
+            "/api/analysis/guard/",
+            {
+                "job_id": "job-crash",
+                "mode": "register",
+                "content_type": "image",
+                "input": [{"url": "file:///tmp/sample.png"}],
+                "meta": {"user_id": "u1", "content_id": "c1"},
+                "options": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["error_code"], "INTERNAL_SERVER_ERROR")
+        self.assertEqual(response.json()["detail"], "서버 내부 오류가 발생했습니다.")

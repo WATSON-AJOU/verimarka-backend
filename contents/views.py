@@ -14,7 +14,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from analysis.services import AIIntegrationError
 from analysis.models import AIJob
 from analysis.tasks import run_register_analysis_job, run_verify_job, run_watermark_job
 from accounts.permissions import IsPhoneVerified, IsWalletLinked
@@ -142,111 +141,98 @@ class ContentRegisterView(APIView):
             getattr(upload, "content_type", None),
         )
 
+        temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
         try:
-            temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
-            try:
-                matching_contents = list(
-                    Content.objects.filter(owner=request.user, source_sha256=source_sha256)
-                    .exclude(status="failed")
-                    .order_by("-updated_at")
+            matching_contents = list(
+                Content.objects.filter(owner=request.user, source_sha256=source_sha256)
+                .exclude(status="failed")
+                .order_by("-updated_at")
+            )
+            existing_content = matching_contents[0] if matching_contents else None
+            if existing_content is not None:
+                existing_job = (
+                    AIJob.objects.filter(content=existing_content, owner=request.user, job_type="register")
+                    .order_by("-created_at")
+                    .first()
                 )
-                existing_content = matching_contents[0] if matching_contents else None
-                if existing_content is not None:
-                    existing_job = (
-                        AIJob.objects.filter(content=existing_content, owner=request.user, job_type="register")
-                        .order_by("-created_at")
-                        .first()
+                if existing_job is not None and existing_job.status in {"queued", "running"}:
+                    logger.info(
+                        "contents.register.idempotent_reuse user_id=%s content_id=%s job_id=%s source_sha256=%s",
+                        getattr(request.user, "id", None),
+                        existing_content.public_id,
+                        existing_job.public_id,
+                        source_sha256,
                     )
-                    if existing_job is not None and existing_job.status in {"queued", "running"}:
-                        logger.info(
-                            "contents.register.idempotent_reuse user_id=%s content_id=%s job_id=%s source_sha256=%s",
-                            getattr(request.user, "id", None),
-                            existing_content.public_id,
-                            existing_job.public_id,
-                            source_sha256,
-                        )
-                        return _build_async_job_response(existing_job, existing_content, request)
+                    return _build_async_job_response(existing_job, existing_content, request)
 
-                    blocked_duplicate_source = next(
-                        (
-                            item
-                            for item in matching_contents
-                            if (
-                                (
-                                    bool((item.blockchain or {}).get("minted"))
-                                    and (item.blockchain or {}).get("mint_kind") == "content"
-                                )
-                                or (
-                                    bool((item.watermark or {}).get("applied"))
-                                    and (
-                                        (item.watermark or {}).get("output_key")
-                                        or (item.watermark or {}).get("output_url")
-                                    )
+                blocked_duplicate_source = next(
+                    (
+                        item
+                        for item in matching_contents
+                        if (
+                            (
+                                bool((item.blockchain or {}).get("minted"))
+                                and (item.blockchain or {}).get("mint_kind") == "content"
+                            )
+                            or (
+                                bool((item.watermark or {}).get("applied"))
+                                and (
+                                    (item.watermark or {}).get("output_key")
+                                    or (item.watermark or {}).get("output_url")
                                 )
                             )
-                        ),
-                        None,
-                    )
-                    if blocked_duplicate_source is not None:
-                        duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
-                            user=request.user,
-                            upload=upload,
-                            source_sha256=source_sha256,
-                            existing_content=blocked_duplicate_source,
-                            temp_path=temp_path,
                         )
-                        duplicate_job = AIJob.objects.create(
-                            owner=request.user,
-                            content=duplicate_content,
-                            job_type="register",
-                            status="success",
-                            request_payload={"duplicate_of": str(blocked_duplicate_source.public_id)},
-                            response_payload={"content_public_id": str(duplicate_content.public_id)},
-                        )
-                        return _build_async_job_response(
-                            duplicate_job,
-                            duplicate_content,
-                            request,
-                            status_code=status.HTTP_200_OK,
-                        )
-
-                content = ContentRegistrationService.create_pending_content(
-                    user=request.user,
-                    upload=upload,
-                    source_sha256=source_sha256,
+                    ),
+                    None,
                 )
-                source_input = ContentRegistrationService._build_source_input(content, temp_path=temp_path)
-            finally:
-                temp_path.unlink(missing_ok=True)
+                if blocked_duplicate_source is not None:
+                    duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
+                        user=request.user,
+                        upload=upload,
+                        source_sha256=source_sha256,
+                        existing_content=blocked_duplicate_source,
+                        temp_path=temp_path,
+                    )
+                    duplicate_job = AIJob.objects.create(
+                        owner=request.user,
+                        content=duplicate_content,
+                        job_type="register",
+                        status="success",
+                        request_payload={"duplicate_of": str(blocked_duplicate_source.public_id)},
+                        response_payload={"content_public_id": str(duplicate_content.public_id)},
+                    )
+                    return _build_async_job_response(
+                        duplicate_job,
+                        duplicate_content,
+                        request,
+                        status_code=status.HTTP_200_OK,
+                    )
 
-            job = AIJob.objects.create(
-                owner=request.user,
-                content=content,
-                job_type="register",
-                request_payload={"source_input": source_input},
+            content = ContentRegistrationService.create_pending_content(
+                user=request.user,
+                upload=upload,
+                source_sha256=source_sha256,
             )
-            task = run_register_analysis_job.delay(str(job.public_id))
-            job.celery_task_id = task.id
-            job.save(update_fields=["celery_task_id", "updated_at"])
-            logger.info(
-                "contents.register.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
-                getattr(request.user, "id", None),
-                content.public_id,
-                job.public_id,
-                task.id,
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.register.ai_error user_id=%s job_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.job_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(
-                exc.to_response().model_dump(),
-                status=exc.status_code,
-            )
+            source_input = ContentRegistrationService._build_source_input(content, temp_path=temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        job = AIJob.objects.create(
+            owner=request.user,
+            content=content,
+            job_type="register",
+            request_payload={"source_input": source_input},
+        )
+        task = run_register_analysis_job.delay(str(job.public_id))
+        job.celery_task_id = task.id
+        job.save(update_fields=["celery_task_id", "updated_at"])
+        logger.info(
+            "contents.register.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
+            getattr(request.user, "id", None),
+            content.public_id,
+            job.public_id,
+            task.id,
+        )
 
         return _build_async_job_response(job, content, request)
 
@@ -277,41 +263,32 @@ class ContentVerifyView(APIView):
             getattr(upload, "content_type", None),
         )
 
+        temp_path = ContentVerificationService._write_temp_file(upload)
         try:
-            temp_path = ContentVerificationService._write_temp_file(upload)
-            try:
-                source_input = ContentVerificationService._build_source_input(temp_path=temp_path, upload=upload)
-            finally:
-                temp_path.unlink(missing_ok=True)
+            source_input = ContentVerificationService._build_source_input(temp_path=temp_path, upload=upload)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
-            job = AIJob.objects.create(
-                owner=request.user,
-                job_type="verify",
-                request_payload={
-                    "source_input": source_input,
-                    "upload_name": upload.name,
-                    "upload_size": upload.size,
-                    "upload_content_type": getattr(upload, "content_type", "") or "application/octet-stream",
-                },
-            )
-            task = run_verify_job.delay(str(job.public_id))
-            job.celery_task_id = task.id
-            job.save(update_fields=["celery_task_id", "updated_at"])
-            logger.info(
-                "contents.verify.enqueued user_id=%s job_id=%s celery_task_id=%s filename=%s",
-                getattr(request.user, "id", None),
-                job.public_id,
-                task.id,
-                upload.name,
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.verify.ai_error user_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        job = AIJob.objects.create(
+            owner=request.user,
+            job_type="verify",
+            request_payload={
+                "source_input": source_input,
+                "upload_name": upload.name,
+                "upload_size": upload.size,
+                "upload_content_type": getattr(upload, "content_type", "") or "application/octet-stream",
+            },
+        )
+        task = run_verify_job.delay(str(job.public_id))
+        job.celery_task_id = task.id
+        job.save(update_fields=["celery_task_id", "updated_at"])
+        logger.info(
+            "contents.verify.enqueued user_id=%s job_id=%s celery_task_id=%s filename=%s",
+            getattr(request.user, "id", None),
+            job.public_id,
+            task.id,
+            upload.name,
+        )
 
         return Response(
             {
@@ -357,32 +334,22 @@ class ContentWatermarkView(APIView):
             )
             return _build_async_job_response(existing_job, content, request)
 
-        try:
-            job = AIJob.objects.create(
-                owner=request.user,
-                content=content,
-                job_type="watermark",
-                request_payload={"content_public_id": str(content.public_id)},
-            )
-            task = run_watermark_job.delay(str(job.public_id))
-            job.celery_task_id = task.id
-            job.save(update_fields=["celery_task_id", "updated_at"])
-            logger.info(
-                "contents.watermark.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
-                getattr(request.user, "id", None),
-                content.public_id,
-                job.public_id,
-                task.id,
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.watermark.ai_error user_id=%s job_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.job_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        job = AIJob.objects.create(
+            owner=request.user,
+            content=content,
+            job_type="watermark",
+            request_payload={"content_public_id": str(content.public_id)},
+        )
+        task = run_watermark_job.delay(str(job.public_id))
+        job.celery_task_id = task.id
+        job.save(update_fields=["celery_task_id", "updated_at"])
+        logger.info(
+            "contents.watermark.enqueued user_id=%s content_id=%s job_id=%s celery_task_id=%s",
+            getattr(request.user, "id", None),
+            content.public_id,
+            job.public_id,
+            task.id,
+        )
         return _build_async_job_response(job, content, request)
 
 
@@ -442,17 +409,7 @@ class ContentMintView(APIView):
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
 
-        try:
-            content = ContentBlockchainService.mint(content=content)
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.mint.ai_error user_id=%s job_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.job_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        content = ContentBlockchainService.mint(content=content)
 
         logger.info(
             "contents.mint.success user_id=%s content_id=%s token_id=%s tx_hash=%s",
@@ -472,20 +429,10 @@ class ContentReviewVoteStartView(APIView):
         serializer = ReviewVoteStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            content = ContentBlockchainService.start_review_vote(
-                content=content,
-                notify_by_email=serializer.validated_data["notify_by_email"],
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.review_vote_start.ai_error user_id=%s job_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.job_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        content = ContentBlockchainService.start_review_vote(
+            content=content,
+            notify_by_email=serializer.validated_data["notify_by_email"],
+        )
 
         logger.info(
             "contents.review_vote_start.success user_id=%s content_id=%s token_id=%s vote_id=%s",
@@ -503,17 +450,7 @@ class ContentReviewVoteStatusView(APIView):
     def get(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
 
-        try:
-            content = ContentBlockchainService.sync_review_vote(content=content)
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.review_vote_status.ai_error user_id=%s job_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                exc.job_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        content = ContentBlockchainService.sync_review_vote(content=content)
 
         logger.info(
             "contents.review_vote_status.success user_id=%s content_id=%s status=%s",
@@ -533,20 +470,10 @@ class ContentReviewVoteSigningContextView(APIView):
         if wallet_link is None or not wallet_link.address:
             return Response({"message": "지갑 연결이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            payload = ContentBlockchainService.get_review_vote_signing_context(
-                content=content,
-                voter_address=wallet_link.address,
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.review_vote_signing.ai_error user_id=%s content_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                public_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        payload = ContentBlockchainService.get_review_vote_signing_context(
+            content=content,
+            voter_address=wallet_link.address,
+        )
 
         return Response(payload, status=status.HTTP_200_OK)
 
@@ -563,23 +490,13 @@ class ContentReviewVoteCastView(APIView):
         serializer = ReviewVoteSignatureSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            content, receipt = ContentBlockchainService.submit_review_vote_signature(
-                content=content,
-                voter_address=wallet_link.address,
-                is_original=serializer.validated_data["is_original"],
-                deadline=serializer.validated_data["deadline"],
-                signature=serializer.validated_data["signature"],
-            )
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.review_vote_cast.ai_error user_id=%s content_id=%s error_code=%s message=%s",
-                getattr(request.user, "id", None),
-                public_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        content, receipt = ContentBlockchainService.submit_review_vote_signature(
+            content=content,
+            voter_address=wallet_link.address,
+            is_original=serializer.validated_data["is_original"],
+            deadline=serializer.validated_data["deadline"],
+            signature=serializer.validated_data["signature"],
+        )
 
         VoteParticipationLog.objects.update_or_create(
             content=content,
@@ -631,16 +548,7 @@ class ContentReviewVoteEventSyncView(APIView):
         except (TypeError, ValueError):
             return Response({"message": "token_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            content = ContentBlockchainService.sync_review_vote_by_token_id(token_id=token_id)
-        except AIIntegrationError as exc:
-            logger.exception(
-                "contents.review_vote_event_sync.ai_error token_id=%s error_code=%s message=%s",
-                token_id,
-                exc.error_code,
-                exc.error_message,
-            )
-            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        content = ContentBlockchainService.sync_review_vote_by_token_id(token_id=token_id)
 
         if content is None:
             return Response({"message": "content not found."}, status=status.HTTP_404_NOT_FOUND)
