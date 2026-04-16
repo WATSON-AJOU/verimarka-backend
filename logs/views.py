@@ -133,7 +133,9 @@ class AnalysisHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        content_items = [self._serialize_content(item, request) for item in Content.objects.filter(owner=request.user)]
+        content_items = []
+        for item in Content.objects.filter(owner=request.user):
+            content_items.extend(self._serialize_content(item, request))
         verify_items = [self._serialize_verification(item) for item in VerificationHistoryLog.objects.filter(user=request.user)]
 
         merged = sorted(
@@ -179,15 +181,60 @@ class AnalysisHistoryView(APIView):
         comparison_file_name = ""
         comparison_public_id = ""
         comparison_label = ""
-        item_type = content.decision or "block"
+        vote_status = (vote.get("status") or "").strip()
+        is_review_vote = blockchain.get("mint_kind") == "review_vote"
+        review_result_item = None
 
         if _is_rejected_review_vote_result(content):
-            item_type = "review"
             end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
             summary = "투표 종료 · 반대 우세"
             extra = f"마감 {end_time} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}"
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
             comparison_label = "유사 후보"
+            return [
+                {
+                    "id": str(content.public_id),
+                    "type": "review",
+                    "file_name": content.original_filename,
+                    "summary": summary,
+                    "timestamp": _format_datetime(content.created_at),
+                    "cosine": _format_cosine(top_cosine),
+                    "phash": _format_phash(top_phash),
+                    "extra": extra,
+                    "preview_url": watermark_preview_url or original_preview_url,
+                    "original_preview_url": original_preview_url,
+                    "comparison_preview_url": comparison_preview_url,
+                    "comparison_file_name": comparison_file_name,
+                    "comparison_public_id": comparison_public_id,
+                    "comparison_label": comparison_label,
+                    "download_url": None,
+                    "blockchain": blockchain,
+                    "sort_key": content.created_at,
+                }
+            ]
+        elif is_review_vote and vote_status == "Approved":
+            end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
+            comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
+            comparison_label = "유사 후보"
+            review_result_item = {
+                "id": f"{content.public_id}-review-result",
+                "type": "review",
+                "file_name": content.original_filename,
+                "summary": "투표 종료 · 찬성 우세",
+                "timestamp": _format_datetime(content.created_at),
+                "cosine": _format_cosine(top_cosine),
+                "phash": _format_phash(top_phash),
+                "extra": f"마감 {end_time} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}",
+                "preview_url": watermark_preview_url or original_preview_url,
+                "original_preview_url": original_preview_url,
+                "comparison_preview_url": comparison_preview_url,
+                "comparison_file_name": comparison_file_name,
+                "comparison_public_id": comparison_public_id,
+                "comparison_label": comparison_label,
+                "download_url": None,
+                "blockchain": blockchain,
+                "sort_key": content.created_at,
+            }
         elif content.decision == "allow":
             summary = (
                 f"워터마크 삽입 완료 (토큰 #{token_id})"
@@ -218,9 +265,9 @@ class AnalysisHistoryView(APIView):
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
             comparison_label = "유사 후보"
 
-        return {
+        allow_or_block_item = {
             "id": str(content.public_id),
-            "type": item_type,
+            "type": content.decision or "block",
             "file_name": content.original_filename,
             "summary": summary,
             "timestamp": _format_datetime(content.created_at),
@@ -241,6 +288,7 @@ class AnalysisHistoryView(APIView):
             "blockchain": blockchain,
             "sort_key": content.created_at,
         }
+        return [allow_or_block_item, review_result_item] if review_result_item else [allow_or_block_item]
 
     def _serialize_verification(self, log: VerificationHistoryLog):
         candidate = log.candidate or {}
