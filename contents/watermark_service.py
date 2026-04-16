@@ -136,14 +136,52 @@ class ContentWatermarkService:
             }
             content.save(update_fields=["watermark", "updated_at"])
             raise
+        except Exception as exc:
+            latest_watermark = content.watermark or {}
+            error = AIIntegrationError(
+                error_code="WATERMARK_PROCESSING_FAIL",
+                error_message=str(exc) or "워터마크 처리 중 오류가 발생했습니다.",
+                retryable=True,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
+            content.watermark = {
+                **latest_watermark,
+                "requested": True,
+                "applied": False,
+                "processing": False,
+                "last_error": error.error_message,
+            }
+            content.save(update_fields=["watermark", "updated_at"])
+            raise error from exc
 
     @classmethod
     def _build_source_input(cls, content: Content) -> dict[str, str]:
         if not S3StorageService.is_enabled():
-            return {"local_path": str(Path(content.original_file.path).resolve())}
+            try:
+                local_path = str(Path(content.original_file.path).resolve())
+            except (AttributeError, NotImplementedError, ValueError, OSError) as exc:
+                raise AIIntegrationError(
+                    error_code="FILE_NOT_FOUND",
+                    error_message="워터마크 삽입에 사용할 원본 파일을 찾을 수 없습니다.",
+                    retryable=False,
+                    status_code=500,
+                    job_id=str(content.public_id),
+                ) from exc
+            return {"local_path": local_path}
 
         key = content.original_storage_key
         if not key:
+            try:
+                local_path = content.original_file.path
+            except (AttributeError, NotImplementedError, ValueError, OSError) as exc:
+                raise AIIntegrationError(
+                    error_code="FILE_NOT_FOUND",
+                    error_message="워터마크 삽입에 사용할 원본 파일을 찾을 수 없습니다.",
+                    retryable=False,
+                    status_code=500,
+                    job_id=str(content.public_id),
+                ) from exc
             key = S3StorageService.build_content_key(
                 owner_id=content.owner_id,
                 content_public_id=str(content.public_id),
@@ -151,7 +189,7 @@ class ContentWatermarkService:
                 stage=settings.CONTENT_ORIGINAL_PREFIX,
             )
             S3StorageService.upload_file(
-                local_path=content.original_file.path,
+                local_path=local_path,
                 key=key,
                 content_type=content.mime_type,
             )
@@ -166,6 +204,15 @@ class ContentWatermarkService:
 
     @classmethod
     def _store_local_result(cls, content: Content, output_path: str) -> str:
+        source_path = Path(output_path)
+        if not source_path.exists():
+            raise AIIntegrationError(
+                error_code="FILE_NOT_FOUND",
+                error_message="워터마크 결과 파일을 찾을 수 없습니다.",
+                retryable=False,
+                status_code=500,
+                job_id=str(content.public_id),
+            )
         destination_dir = (
             Path(settings.MEDIA_ROOT)
             / "contents"
@@ -175,5 +222,5 @@ class ContentWatermarkService:
         )
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination_path = destination_dir / Path(content.original_filename).name
-        shutil.copyfile(output_path, destination_path)
+        shutil.copyfile(source_path, destination_path)
         return f"{settings.MEDIA_URL.rstrip('/')}/contents/{content.owner_id}/{content.public_id}/watermark/{destination_path.name}"
