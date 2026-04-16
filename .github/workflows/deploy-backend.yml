@@ -1,0 +1,55 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BACKEND_DEPLOY_SSH_KEY }}
+
+      - name: Add deploy host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.BACKEND_DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy backend with docker compose
+        env:
+          DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.BACKEND_DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.BACKEND_DEPLOY_PATH }}
+          DEPLOY_BRANCH: ${{ secrets.BACKEND_DEPLOY_BRANCH }}
+          HEALTHCHECK_URL: ${{ secrets.BACKEND_HEALTHCHECK_URL }}
+        run: |
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL}'; bash -s" <<'EOF'
+          set -euo pipefail
+
+          cd "${DEPLOY_PATH}"
+
+          git fetch origin
+          git checkout "${DEPLOY_BRANCH}"
+          git pull --ff-only origin "${DEPLOY_BRANCH}"
+
+          docker compose -f docker-compose.prod.yml up -d --build
+
+          if [ -n "${HEALTHCHECK_URL}" ]; then
+            curl -fsS "${HEALTHCHECK_URL}" >/dev/null
+          fi
+          EOF

@@ -86,6 +86,40 @@ DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect reserved
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+## 백엔드 CI/CD
+
+GitHub Actions 워크플로는 `main` 브랜치 push 또는 수동 실행 시 운영 서버에 SSH 접속해서 백엔드 리포지토리를 갱신한 뒤, 아래 명령을 실행합니다.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+워크플로 파일:
+`/.github/workflows/deploy-backend.yml`
+
+필수 GitHub Secrets:
+- `BACKEND_DEPLOY_HOST`
+- `BACKEND_DEPLOY_PORT`
+- `BACKEND_DEPLOY_USER`
+- `BACKEND_DEPLOY_SSH_KEY`
+- `BACKEND_DEPLOY_PATH`
+
+선택 GitHub Secrets:
+- `BACKEND_DEPLOY_BRANCH`
+- `BACKEND_HEALTHCHECK_URL`
+
+권장 운영값:
+- `BACKEND_DEPLOY_BRANCH`: `main`
+- `BACKEND_DEPLOY_PATH`: 운영 서버의 `verimarka-BACKEND` 리포지토리 경로
+  예: `/opt/verimarka/verimarka-BACKEND`
+- `BACKEND_HEALTHCHECK_URL`: 배포 후 확인할 API 주소
+  예: `https://verimarka.com/api/`
+
+주의:
+- 운영 서버의 `BACKEND_DEPLOY_PATH` 는 이미 `origin` 이 `WATSON-AJOU/WATSON-BACKEND` 로 연결되어 있어야 합니다.
+- 운영 서버에 `docker`, `docker compose`, `git`, `curl` 이 설치되어 있어야 합니다.
+- 운영용 `.env.prod` 는 서버에만 두고 GitHub Secrets 로 올리지 않는 전제를 사용합니다.
+
 ## 운영 인증서 발급 / 갱신
 
 도메인 구성:
