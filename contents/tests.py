@@ -1,8 +1,9 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from analysis.contracts import (
@@ -14,6 +15,8 @@ from analysis.contracts import (
 )
 from analysis.models import AIJob
 from logs.models import VerificationHistoryLog
+from wallets.models import WalletLink
+from .blockchain_service import ContentBlockchainService
 from .models import Content
 from .verification_service import ContentVerificationService
 
@@ -258,3 +261,141 @@ class ContentVerifyFilenameTests(TestCase):
         log = VerificationHistoryLog.objects.get()
         self.assertEqual((payload.get("uploaded") or {}).get("file_name"), "verify file!!.png")
         self.assertEqual(log.uploaded_file_name, "verify file!!.png")
+
+
+class ContentBlockchainFilenameTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="chainuser",
+            nickname="chainuser",
+            display_name="Chain User",
+            email="chainuser@example.com",
+            password="password1234",
+            phone="01055556666",
+            phone_verified=True,
+        )
+        WalletLink.objects.create(
+            user=self.user,
+            address="0x1234567890123456789012345678901234567890",
+            verified_at=timezone.now(),
+        )
+
+    def _create_content(self, *, decision: str, status: str, filename: str) -> Content:
+        return Content.objects.create(
+            owner=self.user,
+            content_type="image",
+            status=status,
+            decision=decision,
+            original_file=SimpleUploadedFile(filename, b"fake-image-bytes", content_type="image/png"),
+            original_filename=filename,
+            mime_type="image/png",
+            file_size=16,
+            watermark={"applied": True, "payload_id": 4242, "model": "wam", "model_version": "v2"},
+        )
+
+    @patch.object(ContentBlockchainService, "_ensure_vector_upserted", side_effect=lambda *, content: content)
+    @patch.object(ContentBlockchainService, "_load_watermarked_bytes", return_value=b"watermarked-bytes")
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_mint_passes_and_persists_file_name(
+        self,
+        mocked_create_client,
+        _mocked_load_bytes,
+        _mocked_upsert,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 11155111
+        blockchain.contract_address = "0xabc"
+        blockchain.compute_file_hash_sha256.return_value = b"\x11" * 32
+        blockchain.mint_document_with_metadata.return_value = {
+            "tx_hash": "0xtx",
+            "block_number": 10,
+            "gas_used": 12345,
+            "token_uri": "ipfs://token",
+        }
+        blockchain.verify_document.return_value = {
+            "exists": True,
+            "token_id": 7,
+            "owner": "0x1234567890123456789012345678901234567890",
+            "status": "Approved",
+            "verification_link": "https://example.com/verify/7",
+            "author_name": "Chain User",
+            "file_name": "minted-name.png",
+        }
+        blockchain.get_document_info.return_value = {
+            "status": "Approved",
+            "upvotes": 0,
+            "downvotes": 0,
+            "end_time": 0,
+            "file_hash": b"\x11" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "minted-name.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="allow", status="allow", filename="origin-name.png")
+        updated = ContentBlockchainService.mint(content=content)
+
+        blockchain.mint_document_with_metadata.assert_called_once_with(
+            to="0x1234567890123456789012345678901234567890",
+            wm_id=4242,
+            file_hash=b"\x11" * 32,
+            author_name="Chain User",
+            file_name="origin-name.png",
+            is_suspicious=False,
+        )
+        self.assertEqual(updated.blockchain["file_name"], "minted-name.png")
+        self.assertEqual(updated.blockchain["document"]["file_name"], "minted-name.png")
+
+    @patch.object(ContentBlockchainService, "_load_original_bytes", return_value=b"original-bytes")
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_review_vote_flow_keeps_file_name(
+        self,
+        mocked_create_client,
+        _mocked_load_original_bytes,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 11155111
+        blockchain.contract_address = "0xabc"
+        blockchain.compute_file_hash_sha256.return_value = b"\x22" * 32
+        blockchain.is_file_hash_used.return_value = False
+        blockchain.mint_document_with_metadata.return_value = {
+            "tx_hash": "0xtx2",
+            "block_number": 11,
+            "gas_used": 22345,
+            "token_uri": "ipfs://vote-token",
+        }
+        blockchain.verify_document.return_value = {
+            "exists": True,
+            "token_id": 9,
+            "owner": "0x1234567890123456789012345678901234567890",
+            "status": "Pending",
+            "verification_link": "https://example.com/verify/9",
+            "author_name": "Chain User",
+            "file_name": "vote-name.png",
+        }
+        blockchain.get_document_info.return_value = {
+            "status": "Pending",
+            "upvotes": 0,
+            "downvotes": 0,
+            "end_time": 1710003600,
+            "file_hash": b"\x22" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "vote-name.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="review", status="review", filename="review-origin.png")
+        updated = ContentBlockchainService.start_review_vote(content=content)
+
+        blockchain.mint_document_with_metadata.assert_called_once_with(
+            to="0x1234567890123456789012345678901234567890",
+            wm_id=4242,
+            file_hash=b"\x22" * 32,
+            author_name="Chain User",
+            file_name="review-origin.png",
+            is_suspicious=True,
+        )
+        self.assertEqual(updated.blockchain["file_name"], "vote-name.png")
+        self.assertEqual(updated.blockchain["document"]["file_name"], "vote-name.png")

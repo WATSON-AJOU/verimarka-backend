@@ -69,6 +69,7 @@ class ContentBlockchainService:
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
         author_name = cls._resolve_author_name(content)
+        file_name = cls._resolve_file_name(content)
 
         try:
             receipt = blockchain.mint_document_with_metadata(
@@ -76,6 +77,7 @@ class ContentBlockchainService:
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
                 author_name=author_name,
+                file_name=file_name,
                 is_suspicious=False,
             )
             verification = blockchain.verify_document(wm_id)
@@ -115,6 +117,7 @@ class ContentBlockchainService:
             "status": verification.get("status") or "Approved",
             "verification_link": verification.get("verification_link"),
             "author_name": verification.get("author_name") or author_name,
+            "file_name": verification.get("file_name") or file_name,
             "token_uri": receipt.get("token_uri") or cls._build_token_uri(content),
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
@@ -152,6 +155,7 @@ class ContentBlockchainService:
         file_hash_bytes = blockchain.compute_file_hash_sha256(file_bytes)
         wm_id = cls._resolve_wm_id(content)
         author_name = cls._resolve_author_name(content)
+        file_name = cls._resolve_file_name(content)
         file_hash_hex = f"0x{file_hash_bytes.hex()}"
 
         try:
@@ -188,6 +192,7 @@ class ContentBlockchainService:
                 wm_id=wm_id,
                 file_hash=file_hash_bytes,
                 author_name=author_name,
+                file_name=file_name,
                 is_suspicious=True,
             )
         except Exception as exc:
@@ -207,6 +212,7 @@ class ContentBlockchainService:
             "wm_id": wm_id,
             "token_uri": receipt.get("token_uri") or cls._build_token_uri(content),
             "author_name": author_name,
+            "file_name": file_name,
             "file_hash": f"0x{file_hash_bytes.hex()}",
             "tx_hash": receipt.get("tx_hash"),
             "block_number": receipt.get("block_number"),
@@ -287,6 +293,7 @@ class ContentBlockchainService:
             "status": verification.get("status") or status_name,
             "verification_link": verification.get("verification_link"),
             "author_name": verification.get("author_name") or blockchain_data.get("author_name"),
+            "file_name": verification.get("file_name") or token_info.get("file_name") or blockchain_data.get("file_name") or cls._resolve_file_name(content),
             "token_uri": blockchain_data.get("token_uri") or cls._build_token_uri(content),
             "minted_at": blockchain_data.get("minted_at") or now.isoformat(),
             "minted_at_display": minted_at_display,
@@ -683,6 +690,14 @@ class ContentBlockchainService:
             or getattr(owner, "email", "").split("@")[0]
             or "사용자"
         )
+
+    @classmethod
+    def _resolve_file_name(cls, content: Content) -> str:
+        if content.original_filename:
+            return content.original_filename
+        if content.original_file and content.original_file.name:
+            return Path(content.original_file.name).name
+        return str(content.public_id)
 
     @classmethod
     def _json_safe(cls, value: Any) -> Any:
