@@ -6,7 +6,7 @@ from django.db import transaction
 
 from analysis.services import AIIntegrationError
 from analysis.watermark_services import WatermarkAIService
-
+from contents.blockchain_service import ContentBlockchainService
 from .models import Content
 from .storage import S3StorageService
 
@@ -123,6 +123,7 @@ class ContentWatermarkService:
                 "last_error": "",
             }
             content.save(update_fields=["watermark", "updated_at"])
+            ContentBlockchainService._ensure_vector_upserted(content=content)
             return content
         except AIIntegrationError as exc:
             latest_watermark = content.watermark or {}
