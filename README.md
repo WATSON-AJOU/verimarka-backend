@@ -11,6 +11,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+로컬 개발에서 포맷터와 pre-commit 훅까지 같이 쓰려면:
+
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
 ### 2. 로컬 DB / Redis 실행
 현재 `docker-compose.yml`에는 `db`, `redis`만 있습니다.
 
@@ -76,6 +83,23 @@ redis-cli -p 6379 ping
 ```bash
 DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect active
 DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect reserved
+```
+
+## 코드 포맷 / pre-commit
+
+이 저장소는 `ruff check --fix` 와 `ruff format` 을 pre-commit 훅으로 사용합니다.
+
+수동 실행:
+
+```bash
+ruff check . --fix
+ruff format .
+```
+
+전체 파일에 훅 실행:
+
+```bash
+pre-commit run --all-files
 ```
 
 ## 운영 compose
