@@ -1,6 +1,8 @@
 from pathlib import Path
 import environ
 
+from config.logging import build_logging_config
+
 
 def _find_project_base() -> Path:
     current = Path(__file__).resolve()
@@ -57,6 +59,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "config.middleware.RequestIdMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -195,45 +198,6 @@ CONTENT_ORIGINAL_PREFIX = env("CONTENT_ORIGINAL_PREFIX", default="original")
 CONTENT_CANDIDATE_PREFIX = env("CONTENT_CANDIDATE_PREFIX", default="candidate")
 CONTENT_RESULT_PREFIX = env("CONTENT_RESULT_PREFIX", default="result")
 CONTENT_VERIFY_PREFIX = env("CONTENT_VERIFY_PREFIX", default="verify")
+DJANGO_LOG_LEVEL = env("DJANGO_LOG_LEVEL", default="INFO").upper()
 
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "standard": {
-            "format": "%(levelname)s:%(name)s:%(message)s",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "standard",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "analysis": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "contents": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "accounts": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-    },
-}
+LOGGING = build_logging_config(default_level=DJANGO_LOG_LEVEL)

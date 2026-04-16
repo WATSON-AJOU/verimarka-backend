@@ -102,6 +102,20 @@ ruff format .
 pre-commit run --all-files
 ```
 
+## 로깅
+
+백엔드는 공통 콘솔 로깅과 `X-Request-Id` 기반 요청 추적을 사용합니다.
+
+- 모든 응답에 `X-Request-Id` 헤더가 추가됩니다.
+- 로그 포맷에는 시간, 레벨, `request_id`, 로거명, 라인번호가 포함됩니다.
+- 로그 레벨은 `DJANGO_LOG_LEVEL` 환경변수로 조절합니다.
+
+예:
+
+```bash
+DJANGO_LOG_LEVEL=DEBUG
+```
+
 ## 운영 compose
 
 운영은 별도 파일을 사용합니다.
