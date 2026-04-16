@@ -123,6 +123,12 @@ def _is_review_vote_closed(vote):
     return end_time <= timezone.now()
 
 
+def _is_rejected_review_vote_result(content: Content) -> bool:
+    blockchain = content.blockchain or {}
+    vote = blockchain.get("vote") or {}
+    return blockchain.get("mint_kind") == "review_vote" and (vote.get("status") or "").strip() == "Rejected"
+
+
 class AnalysisHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -161,9 +167,10 @@ class AnalysisHistoryView(APIView):
         )
 
     def _serialize_content(self, content: Content, request):
-        vote = (content.blockchain or {}).get("vote") or {}
-        minted = (content.blockchain or {}).get("minted")
-        token_id = (content.blockchain or {}).get("token_id")
+        blockchain = content.blockchain or {}
+        vote = blockchain.get("vote") or {}
+        minted = blockchain.get("minted")
+        token_id = blockchain.get("token_id")
         fallback_cosine, fallback_phash = _extract_metric_fallback(content.reason)
         top_cosine = content.top_cosine if content.top_cosine is not None else fallback_cosine
         top_phash = content.top_phash_dist if content.top_phash_dist is not None else fallback_phash
@@ -172,15 +179,23 @@ class AnalysisHistoryView(APIView):
         comparison_file_name = ""
         comparison_public_id = ""
         comparison_label = ""
+        item_type = content.decision or "block"
 
-        if content.decision == "allow":
+        if _is_rejected_review_vote_result(content):
+            item_type = "review"
+            end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
+            summary = "투표 종료 · 반대 우세"
+            extra = f"마감 {end_time} · 찬성 {vote.get('upvotes', 0)} · 반대 {vote.get('downvotes', 0)}"
+            comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
+            comparison_label = "유사 후보"
+        elif content.decision == "allow":
             summary = (
                 f"워터마크 삽입 완료 (토큰 #{token_id})"
                 if minted and token_id
                 else "등록 승인 완료"
             )
             extra = (
-                f"{(content.blockchain or {}).get('network_name', 'Sepolia')} · Token #{token_id}"
+                f"{blockchain.get('network_name', 'Sepolia')} · Token #{token_id}"
                 if token_id
                 else "등록 승인됨"
             )
@@ -205,7 +220,7 @@ class AnalysisHistoryView(APIView):
 
         return {
             "id": str(content.public_id),
-            "type": content.decision or "block",
+            "type": item_type,
             "file_name": content.original_filename,
             "summary": summary,
             "timestamp": _format_datetime(content.created_at),
@@ -223,7 +238,7 @@ class AnalysisHistoryView(APIView):
                 if content.decision == "allow" and (content.watermark or {}).get("applied")
                 else None
             ),
-            "blockchain": content.blockchain or {},
+            "blockchain": blockchain,
             "sort_key": content.created_at,
         }
 
