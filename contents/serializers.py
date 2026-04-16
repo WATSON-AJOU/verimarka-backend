@@ -112,3 +112,7 @@ class ReviewVoteSignatureSerializer(serializers.Serializer):
         if not signature.startswith("0x"):
             raise serializers.ValidationError("서명 형식이 올바르지 않습니다.")
         return signature
+
+
+class ReviewVoteStartSerializer(serializers.Serializer):
+    notify_by_email = serializers.BooleanField(required=False, default=False)

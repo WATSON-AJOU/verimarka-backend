@@ -20,7 +20,7 @@ from analysis.tasks import run_register_analysis_job, run_verify_job, run_waterm
 from accounts.permissions import IsPhoneVerified, IsWalletLinked
 
 from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
-from .serializers import ReviewVoteSignatureSerializer
+from .serializers import ReviewVoteSignatureSerializer, ReviewVoteStartSerializer
 from .services import ContentRegistrationService
 from .models import Content, VoteParticipationLog
 from .blockchain_service import ContentBlockchainService
@@ -469,9 +469,14 @@ class ContentReviewVoteStartView(APIView):
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+        serializer = ReviewVoteStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         try:
-            content = ContentBlockchainService.start_review_vote(content=content)
+            content = ContentBlockchainService.start_review_vote(
+                content=content,
+                notify_by_email=serializer.validated_data["notify_by_email"],
+            )
         except AIIntegrationError as exc:
             logger.exception(
                 "contents.review_vote_start.ai_error user_id=%s job_id=%s error_code=%s message=%s",

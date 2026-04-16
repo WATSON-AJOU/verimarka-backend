@@ -10,6 +10,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from analysis.services import AIIntegrationError
+from accounts.services.email_service import EmailSendError, send_review_vote_result_email
 
 from .models import Content
 from .storage import S3StorageService
@@ -134,7 +135,7 @@ class ContentBlockchainService:
         return content
 
     @classmethod
-    def start_review_vote(cls, *, content: Content) -> Content:
+    def start_review_vote(cls, *, content: Content, notify_by_email: bool = False) -> Content:
         if content.decision != "review":
             raise AIIntegrationError(
                 error_code="INVALID_STATE",
@@ -147,6 +148,15 @@ class ContentBlockchainService:
         existing_blockchain = content.blockchain or {}
         existing_vote = existing_blockchain.get("vote") or {}
         if existing_blockchain.get("mint_kind") == "review_vote" and existing_blockchain.get("token_id"):
+            if bool(existing_vote.get("notify_by_email")) != bool(notify_by_email):
+                content.blockchain = {
+                    **existing_blockchain,
+                    "vote": {
+                        **existing_vote,
+                        "notify_by_email": bool(notify_by_email),
+                    },
+                }
+                content.save(update_fields=["blockchain", "updated_at"])
             return cls.sync_review_vote(content=content)
 
         blockchain = cls._create_client()
@@ -220,6 +230,10 @@ class ContentBlockchainService:
             "vote": {
                 **existing_vote,
                 "active": True,
+                "notify_by_email": bool(notify_by_email),
+                "email_notification_sent": False,
+                "email_notification_sent_at": None,
+                "email_notification_error": "",
             },
         }
         content.status = "review"
@@ -230,6 +244,8 @@ class ContentBlockchainService:
     @classmethod
     def sync_review_vote(cls, *, content: Content) -> Content:
         blockchain_data = content.blockchain or {}
+        previous_vote_data = blockchain_data.get("vote") or {}
+        previous_status_name = (previous_vote_data.get("status") or "").strip() or "Pending"
         if blockchain_data.get("mint_kind") != "review_vote":
             raise AIIntegrationError(
                 error_code="INVALID_STATE",
@@ -278,6 +294,17 @@ class ContentBlockchainService:
         now = timezone.now()
         vote_payload = cls._build_vote_payload(content=content, token_id=token_id, status_name=status_name, token_info=token_info)
         minted_at_display = blockchain_data.get("minted_at_display") or timezone.localtime(now).strftime("%Y.%m.%d %H:%M")
+        notify_by_email = bool(previous_vote_data.get("notify_by_email"))
+        email_notification_sent = bool(previous_vote_data.get("email_notification_sent"))
+        email_notification_error = previous_vote_data.get("email_notification_error") or ""
+
+        if notify_by_email:
+            vote_payload["notify_by_email"] = True
+        if email_notification_sent:
+            vote_payload["email_notification_sent"] = True
+            vote_payload["email_notification_sent_at"] = previous_vote_data.get("email_notification_sent_at")
+        if email_notification_error:
+            vote_payload["email_notification_error"] = email_notification_error
 
         updated_blockchain = {
             **blockchain_data,
@@ -321,6 +348,19 @@ class ContentBlockchainService:
             content.decision = "review"
             content.next_action = "start_vote"
             update_fields.extend(["status", "decision", "next_action"])
+
+        should_send_email = (
+            notify_by_email
+            and not email_notification_sent
+            and previous_status_name == "Pending"
+            and status_name in {"Approved", "Rejected"}
+        )
+        if should_send_email:
+            updated_blockchain["vote"] = cls._send_review_vote_result_notification(
+                content=content,
+                vote_payload=updated_blockchain["vote"],
+                status_name=status_name,
+            )
 
         content.save(update_fields=update_fields)
         return content
@@ -827,3 +867,53 @@ class ContentBlockchainService:
             return f"{base_url}{output_url}"
 
         return f"{getattr(settings, 'VERIMARKA_PUBLIC_BASE_URL', 'https://verimarka.com').rstrip('/')}/history"
+
+    @classmethod
+    def _send_review_vote_result_notification(
+        cls,
+        *,
+        content: Content,
+        vote_payload: dict[str, Any],
+        status_name: str,
+    ) -> dict[str, Any]:
+        owner = getattr(content, "owner", None)
+        email = (getattr(owner, "email", "") or "").strip()
+        if not email:
+            return {
+                **vote_payload,
+                "email_notification_sent": False,
+                "email_notification_sent_at": None,
+                "email_notification_error": "알림을 받을 이메일이 없습니다.",
+            }
+
+        try:
+            send_review_vote_result_email(
+                email=email,
+                file_name=content.original_filename or cls._resolve_file_name(content),
+                status_name=status_name,
+                upvotes=int(vote_payload.get("upvotes") or 0),
+                downvotes=int(vote_payload.get("downvotes") or 0),
+                end_time_display=vote_payload.get("end_time_display"),
+            )
+        except EmailSendError as exc:
+            logger.warning(
+                "contents.blockchain.review_vote_result_email_failed content_id=%s user_id=%s email=%s error=%s",
+                content.public_id,
+                getattr(owner, "id", None),
+                email,
+                exc,
+            )
+            return {
+                **vote_payload,
+                "email_notification_sent": False,
+                "email_notification_sent_at": None,
+                "email_notification_error": str(exc),
+            }
+
+        sent_at = timezone.now()
+        return {
+            **vote_payload,
+            "email_notification_sent": True,
+            "email_notification_sent_at": sent_at.isoformat(),
+            "email_notification_error": "",
+        }

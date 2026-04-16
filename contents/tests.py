@@ -402,6 +402,111 @@ class ContentBlockchainFilenameTests(TestCase):
         self.assertEqual(updated.blockchain["file_name"], "vote-name.png")
         self.assertEqual(updated.blockchain["document"]["file_name"], "vote-name.png")
 
+    @patch.object(ContentBlockchainService, "_load_original_bytes", return_value=b"original-bytes")
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_start_review_vote_persists_notify_by_email(
+        self,
+        mocked_create_client,
+        _mocked_load_original_bytes,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 11155111
+        blockchain.contract_address = "0xabc"
+        blockchain.compute_file_hash_sha256.return_value = b"\x23" * 32
+        blockchain.is_file_hash_used.return_value = False
+        blockchain.mint_document_with_metadata.return_value = {
+            "tx_hash": "0xtx3",
+            "block_number": 12,
+            "gas_used": 32345,
+            "token_uri": "ipfs://vote-token-2",
+        }
+        blockchain.verify_document.return_value = {
+            "exists": True,
+            "token_id": 10,
+            "owner": "0x1234567890123456789012345678901234567890",
+            "status": "Pending",
+            "verification_link": "https://example.com/verify/10",
+            "author_name": "Chain User",
+            "file_name": "vote-name-2.png",
+        }
+        blockchain.get_document_info.return_value = {
+            "status": "Pending",
+            "upvotes": 0,
+            "downvotes": 0,
+            "end_time": 1710003600,
+            "file_hash": b"\x23" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "vote-name-2.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="review", status="review", filename="review-notify.png")
+        updated = ContentBlockchainService.start_review_vote(content=content, notify_by_email=True)
+
+        self.assertTrue(updated.blockchain["vote"]["notify_by_email"])
+        self.assertFalse(updated.blockchain["vote"]["email_notification_sent"])
+
+    @patch("contents.blockchain_service.send_review_vote_result_email")
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_sync_review_vote_sends_result_email_only_once(
+        self,
+        mocked_create_client,
+        mocked_send_email,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 11155111
+        blockchain.contract_address = "0xabc"
+        blockchain.verify_document.return_value = {
+            "exists": True,
+            "token_id": 11,
+            "owner": "0x1234567890123456789012345678901234567890",
+            "status": "Approved",
+            "verification_link": "https://example.com/verify/11",
+            "author_name": "Chain User",
+            "file_name": "vote-approved.png",
+        }
+        blockchain.get_document_info.return_value = {
+            "status": "Approved",
+            "upvotes": 8,
+            "downvotes": 2,
+            "end_time": 1710003600,
+            "file_hash": b"\x24" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "vote-approved.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="review", status="review", filename="vote-approved.png")
+        content.watermark = {"applied": False}
+        content.blockchain = {
+            "minted": True,
+            "mint_kind": "review_vote",
+            "recipient_address": "0x1234567890123456789012345678901234567890",
+            "wm_id": 4242,
+            "token_id": 11,
+            "author_name": "Chain User",
+            "file_name": "vote-approved.png",
+            "vote": {
+                "status": "Pending",
+                "notify_by_email": True,
+                "email_notification_sent": False,
+            },
+        }
+        content.save(update_fields=["watermark", "blockchain", "updated_at"])
+
+        updated = ContentBlockchainService.sync_review_vote(content=content)
+        updated.refresh_from_db()
+
+        mocked_send_email.assert_called_once()
+        self.assertTrue(updated.blockchain["vote"]["email_notification_sent"])
+        self.assertEqual(updated.status, "allow")
+        self.assertEqual(updated.decision, "allow")
+
+        ContentBlockchainService.sync_review_vote(content=updated)
+        mocked_send_email.assert_called_once()
+
 
 class ContentWatermarkServiceTests(TestCase):
     def setUp(self):
