@@ -129,6 +129,12 @@ def _is_rejected_review_vote_result(content: Content) -> bool:
     return blockchain.get("mint_kind") == "review_vote" and (vote.get("status") or "").strip() == "Rejected"
 
 
+def _has_content_mint(blockchain: dict | None) -> bool:
+    if not blockchain:
+        return False
+    return bool(blockchain.get("minted")) and blockchain.get("mint_kind") == "content"
+
+
 class AnalysisHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -171,8 +177,9 @@ class AnalysisHistoryView(APIView):
     def _serialize_content(self, content: Content, request):
         blockchain = content.blockchain or {}
         vote = blockchain.get("vote") or {}
-        minted = blockchain.get("minted")
+        minted = _has_content_mint(blockchain)
         token_id = blockchain.get("token_id")
+        watermark_applied = bool((content.watermark or {}).get("applied"))
         fallback_cosine, fallback_phash = _extract_metric_fallback(content.reason)
         top_cosine = content.top_cosine if content.top_cosine is not None else fallback_cosine
         top_phash = content.top_phash_dist if content.top_phash_dist is not None else fallback_phash
@@ -239,11 +246,15 @@ class AnalysisHistoryView(APIView):
             summary = (
                 f"워터마크 삽입 완료 (토큰 #{token_id})"
                 if minted and token_id
+                else "워터마크 삽입 완료"
+                if watermark_applied
                 else "등록 승인 완료"
             )
             extra = (
                 f"{blockchain.get('network_name', 'Sepolia')} · Token #{token_id}"
-                if token_id
+                if minted and token_id
+                else "토큰 발행 대기"
+                if watermark_applied
                 else "등록 승인됨"
             )
             comparison_preview_url = watermark_preview_url
@@ -282,7 +293,7 @@ class AnalysisHistoryView(APIView):
             "comparison_label": comparison_label,
             "download_url": (
                 reverse("content_watermark_download", kwargs={"public_id": content.public_id})
-                if content.decision == "allow" and (content.watermark or {}).get("applied")
+                if content.decision == "allow" and watermark_applied
                 else None
             ),
             "blockchain": blockchain,
@@ -347,11 +358,15 @@ class PublicRecentActivityView(APIView):
     def _serialize_content(self, content: Content, request):
         vote = (content.blockchain or {}).get("vote") or {}
         token_id = (content.blockchain or {}).get("token_id")
+        watermark_applied = bool((content.watermark or {}).get("applied"))
+        minted = _has_content_mint(content.blockchain or {})
 
         if content.decision == "allow":
             description = (
                 f"워터마크 삽입 완료 · 토큰 #{token_id}"
-                if token_id
+                if minted and token_id
+                else "워터마크 삽입 완료"
+                if watermark_applied
                 else "등록 승인 완료"
             )
             progress = None

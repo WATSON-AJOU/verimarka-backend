@@ -108,3 +108,40 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(review_item["summary"], "투표 종료 · 찬성 우세")
         self.assertIn("찬성 8 · 반대 2", review_item["extra"])
         self.assertEqual(allow_item["summary"], "등록 승인 완료")
+
+    def test_approved_review_vote_without_watermark_does_not_look_minted(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="image",
+            status="allow",
+            decision="allow",
+            original_file="",
+            original_filename="review-approved-not-minted.png",
+            mime_type="image/png",
+            file_size=123,
+            reason="커뮤니티 검증 승인",
+            top_cosine=0.79,
+            top_phash_dist=7,
+            blockchain={
+                "minted": True,
+                "mint_kind": "review_vote",
+                "network_name": "Sepolia",
+                "token_id": 77,
+                "vote": {
+                    "status": "Approved",
+                    "upvotes": 8,
+                    "downvotes": 2,
+                    "end_time_display": "2026.04.17 12:00",
+                },
+            },
+            watermark={"applied": False},
+        )
+
+        response = self.client.get("/api/logs/history/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        allow_item = next(item for item in payload if item["type"] == "allow")
+        self.assertEqual(allow_item["summary"], "등록 승인 완료")
+        self.assertEqual(allow_item["extra"], "등록 승인됨")
+        self.assertIsNone(allow_item["download_url"])
