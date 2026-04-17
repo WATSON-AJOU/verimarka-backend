@@ -189,7 +189,7 @@ class AnalysisHistoryView(APIView):
         comparison_public_id = ""
         comparison_label = ""
         vote_status = (vote.get("status") or "").strip()
-        is_review_vote = blockchain.get("mint_kind") == "review_vote"
+        has_review_vote = bool(vote_status) or blockchain.get("mint_kind") == "review_vote"
         review_result_item = None
 
         if _is_rejected_review_vote_result(content):
@@ -219,7 +219,7 @@ class AnalysisHistoryView(APIView):
                     "sort_key": content.created_at,
                 }
             ]
-        elif is_review_vote and vote_status == "Approved":
+        elif has_review_vote and vote_status == "Approved":
             end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = _resolve_history_candidate(content, request)
             comparison_label = "유사 후보"

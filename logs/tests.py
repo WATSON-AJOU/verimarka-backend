@@ -145,3 +145,43 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(allow_item["summary"], "등록 승인 완료")
         self.assertEqual(allow_item["extra"], "등록 승인됨")
         self.assertIsNone(allow_item["download_url"])
+
+    def test_content_mint_after_review_approval_keeps_review_result_history(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="image",
+            status="allow",
+            decision="allow",
+            original_file="",
+            original_filename="review-approved-minted.png",
+            mime_type="image/png",
+            file_size=123,
+            reason="커뮤니티 검증 승인",
+            top_cosine=0.79,
+            top_phash_dist=7,
+            blockchain={
+                "minted": True,
+                "mint_kind": "content",
+                "network_name": "Sepolia",
+                "token_id": 88,
+                "tx_hash": "0x1234567890abcdef",
+                "vote": {
+                    "status": "Approved",
+                    "upvotes": 8,
+                    "downvotes": 2,
+                    "end_time_display": "2026.04.17 12:00",
+                },
+            },
+            watermark={"applied": True, "output_url": "/media/watermarked.png"},
+        )
+
+        response = self.client.get("/api/logs/history/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual({item["type"] for item in payload}, {"review", "allow"})
+        review_item = next(item for item in payload if item["type"] == "review")
+        allow_item = next(item for item in payload if item["type"] == "allow")
+        self.assertEqual(review_item["summary"], "투표 종료 · 찬성 우세")
+        self.assertEqual(allow_item["summary"], "워터마크 삽입 완료 (토큰 #88)")
