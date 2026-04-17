@@ -244,7 +244,7 @@ class AnalysisHistoryView(APIView):
             }
         elif content.decision == "allow":
             summary = (
-                f"워터마크 삽입 완료 (토큰 #{token_id})"
+                f"워터마크 & 토큰 발급 완료 (토큰 #{token_id})"
                 if minted and token_id
                 else "워터마크 삽입 완료"
                 if watermark_applied
@@ -363,7 +363,7 @@ class PublicRecentActivityView(APIView):
 
         if content.decision == "allow":
             description = (
-                f"워터마크 삽입 완료 · 토큰 #{token_id}"
+                f"워터마크 & 토큰 발급 완료 (토큰 #{token_id})"
                 if minted and token_id
                 else "워터마크 삽입 완료"
                 if watermark_applied

@@ -5,6 +5,8 @@ import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from django.conf import settings
 from django.utils import timezone
@@ -770,8 +772,27 @@ class ContentBlockchainService:
             if local_path.exists():
                 return local_path.read_bytes()
 
-        if content.original_file and Path(content.original_file.path).exists():
-            return Path(content.original_file.path).read_bytes()
+        if output_url and str(output_url).startswith(("http://", "https://")):
+            try:
+                with urlopen(str(output_url), timeout=10) as response:
+                    return response.read()
+            except (OSError, URLError) as exc:
+                raise AIIntegrationError(
+                    error_code="FILE_NOT_FOUND",
+                    error_message="민팅에 사용할 워터마크 이미지를 불러오지 못했습니다.",
+                    retryable=False,
+                    status_code=500,
+                    job_id=str(content.public_id),
+                ) from exc
+
+        if content.original_file:
+            try:
+                original_path = content.original_file.path
+            except (AttributeError, NotImplementedError, ValueError, OSError):
+                original_path = None
+
+            if original_path and Path(original_path).exists():
+                return Path(original_path).read_bytes()
 
         raise AIIntegrationError(
             error_code="FILE_NOT_FOUND",

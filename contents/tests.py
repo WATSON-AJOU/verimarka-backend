@@ -349,6 +349,27 @@ class ContentBlockchainFilenameTests(TestCase):
         self.assertEqual(updated.blockchain["file_name"], "minted-name.png")
         self.assertEqual(updated.blockchain["document"]["file_name"], "minted-name.png")
 
+    @patch("contents.blockchain_service.urlopen")
+    def test_load_watermarked_bytes_supports_absolute_output_url(
+        self,
+        mocked_urlopen,
+    ):
+        mocked_response = Mock()
+        mocked_response.read.return_value = b"remote-watermarked-bytes"
+        mocked_urlopen.return_value.__enter__.return_value = mocked_response
+
+        content = self._create_content(decision="allow", status="allow", filename="origin-name.png")
+        content.watermark = {
+            "applied": True,
+            "payload_id": 4242,
+            "output_url": "https://example.com/watermarked.png",
+        }
+
+        result = ContentBlockchainService._load_watermarked_bytes(content)
+
+        self.assertEqual(result, b"remote-watermarked-bytes")
+        mocked_urlopen.assert_called_once_with("https://example.com/watermarked.png", timeout=10)
+
     @patch.object(ContentBlockchainService, "_load_original_bytes", return_value=b"original-bytes")
     @patch.object(ContentBlockchainService, "_create_client")
     def test_review_vote_flow_keeps_file_name(

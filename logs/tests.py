@@ -184,4 +184,4 @@ class AnalysisHistoryViewTests(TestCase):
         review_item = next(item for item in payload if item["type"] == "review")
         allow_item = next(item for item in payload if item["type"] == "allow")
         self.assertEqual(review_item["summary"], "투표 종료 · 찬성 우세")
-        self.assertEqual(allow_item["summary"], "워터마크 삽입 완료 (토큰 #88)")
+        self.assertEqual(allow_item["summary"], "워터마크 & 토큰 발급 완료 (토큰 #88)")
