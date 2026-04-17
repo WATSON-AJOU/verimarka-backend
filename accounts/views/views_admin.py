@@ -16,6 +16,7 @@ from contents.serializers import ContentSerializer
 from contents.services import ContentRegistrationService
 from contents.views import _build_content_preview_url
 from logs.models import VerificationHistoryLog
+from wallets.utils import normalize_wallet_type
 from ..models import User
 from ..serializers import (
     AdminDashboardSerializer,
@@ -270,7 +271,7 @@ def _serialize_user_detail(user: User, request, activity_page: int = 1, activity
         "sms_verification": "완료" if user.phone_verified else "미인증",
         "email_verification": "완료" if user.email_verified else "미인증",
         "wallet_address": wallet_link.address if wallet_link else "",
-        "wallet_method": wallet_link.wallet_type if wallet_link else "",
+        "wallet_method": normalize_wallet_type(wallet_link.wallet_type) if wallet_link else "",
         "wallet_linked_at": _format_date(wallet_link.verified_at) if wallet_link else "",
         "vote_permission": _user_vote_permission(user),
         "activity_page": safe_page,

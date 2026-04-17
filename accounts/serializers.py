@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
 import re
+from wallets.utils import normalize_wallet_type
 from .models import User
 
 
@@ -55,7 +56,7 @@ class MeSerializer(serializers.ModelSerializer):
 
     def get_wallet_type(self, obj):
         wallet_link = getattr(obj, "wallet_link", None)
-        return wallet_link.wallet_type if wallet_link else ""
+        return normalize_wallet_type(wallet_link.wallet_type) if wallet_link else ""
 
 
 class AdminMeSerializer(serializers.ModelSerializer):

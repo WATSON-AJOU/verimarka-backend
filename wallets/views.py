@@ -21,6 +21,7 @@ from .serializers import (
     WalletSummarySerializer,
     WalletVerifyRequestSerializer,
 )
+from .utils import normalize_wallet_type
 
 logger = logging.getLogger("wallets")
 
@@ -246,7 +247,7 @@ class WalletConnectVerifyView(APIView):
             defaults={
                 "address": address,
                 "chain_id": serializer.validated_data.get("chain_id"),
-                "wallet_type": serializer.validated_data.get("wallet_type", ""),
+                "wallet_type": normalize_wallet_type(serializer.validated_data.get("wallet_type", "")),
                 "verified_at": verified_at,
             },
         )
