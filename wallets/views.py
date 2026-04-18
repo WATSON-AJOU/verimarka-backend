@@ -89,7 +89,7 @@ class WalletSummaryView(APIView):
                 "address": None,
                 "chain_id": None,
                 "wallet_type": "",
-                "network_name": "Sepolia",
+                "network_name": "Polygon",
                 "nft_count": None,
                 "vote_minimum": VOTE_MINIMUM_NFT,
                 "vote_eligible": False,
@@ -99,7 +99,7 @@ class WalletSummaryView(APIView):
             return Response(WalletSummarySerializer(payload).data, status=status.HTTP_200_OK)
 
         nft_count = None
-        network_name = "Sepolia"
+        network_name = "Polygon"
         lookup_status = "ok"
         lookup_error = None
         try:
@@ -112,7 +112,7 @@ class WalletSummaryView(APIView):
             effective_chain_id = wallet_link.chain_id or getattr(blockchain, "chain_id", None)
             network_name = ContentBlockchainService.NETWORK_NAME_BY_CHAIN_ID.get(
                 effective_chain_id,
-                f"Chain {effective_chain_id}" if effective_chain_id else "Sepolia",
+                f"Chain {effective_chain_id}" if effective_chain_id else "Polygon",
             )
         except Exception as exc:
             logger.warning(
