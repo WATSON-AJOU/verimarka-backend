@@ -1,6 +1,7 @@
 import importlib.util
 import logging
 import sys
+import time
 import zlib
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from django.utils import timezone
 
 from analysis.services import AIIntegrationError
 from accounts.services.email_service import EmailSendError, send_review_vote_result_email
+from config.sentry import capture_sentry_message
 
 from .models import Content
 from .storage import S3StorageService
@@ -32,6 +34,7 @@ class ContentBlockchainService:
         137: "Polygon",
         80002: "Polygon Amoy",
     }
+    ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
     @classmethod
     def mint(cls, *, content: Content) -> Content:
@@ -60,6 +63,69 @@ class ContentBlockchainService:
             and existing_blockchain.get("minted")
             and existing_blockchain.get("tx_hash")
         ):
+            if existing_blockchain.get("token_id") and cls._normalize_owner_address(existing_blockchain.get("owner_address")):
+                previous_blockchain = cls._json_safe(existing_blockchain)
+                content = cls._ensure_vector_upserted(content=content)
+                if content.blockchain != previous_blockchain:
+                    content.save(update_fields=["blockchain", "updated_at"])
+                return content
+
+            blockchain = cls._create_client()
+            recipient_address = cls._resolve_recipient_address(blockchain, content=content)
+            wm_id = existing_blockchain.get("wm_id") or cls._resolve_wm_id(content)
+            verification = cls._load_verification_snapshot(
+                blockchain=blockchain,
+                wm_id=wm_id,
+                expected_owner=recipient_address,
+                expected_status="Approved",
+            )
+            if verification.get("exists") and verification.get("token_id"):
+                cls._report_blockchain_anomaly(
+                    code="content_mint_repaired",
+                    content=content,
+                    severity="warning",
+                    extra={
+                        "wm_id": wm_id,
+                        "tx_hash": existing_blockchain.get("tx_hash"),
+                        "previous_token_id": existing_blockchain.get("token_id"),
+                        "resolved_token_id": verification.get("token_id"),
+                        "previous_owner_address": existing_blockchain.get("owner_address"),
+                        "resolved_owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
+                    },
+                )
+                token_info = blockchain.get_document_info(verification["token_id"])
+                chain_id = getattr(blockchain, "chain_id", None)
+                content.blockchain = {
+                    **existing_blockchain,
+                    "minted": True,
+                    "mint_kind": "content",
+                    "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
+                    "chain_id": chain_id,
+                    "contract_address": getattr(blockchain, "contract_address", ""),
+                    "recipient_address": recipient_address,
+                    "owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
+                    "wm_id": wm_id,
+                    "token_id": verification.get("token_id"),
+                    "status": verification.get("status") or existing_blockchain.get("status") or "Approved",
+                    "verification_link": verification.get("verification_link") or existing_blockchain.get("verification_link"),
+                    "author_name": verification.get("author_name")
+                    or existing_blockchain.get("author_name")
+                    or cls._resolve_author_name(content),
+                    "file_name": verification.get("file_name")
+                    or existing_blockchain.get("file_name")
+                    or cls._resolve_file_name(content),
+                    "token_uri": existing_blockchain.get("token_uri") or cls._build_token_uri(content),
+                    "minted_at": existing_blockchain.get("minted_at") or timezone.now().isoformat(),
+                    "minted_at_display": existing_blockchain.get("minted_at_display")
+                    or timezone.localtime(timezone.now()).strftime("%Y.%m.%d %H:%M"),
+                    "document": cls._json_safe(token_info or {}),
+                }
+                previous_blockchain = cls._json_safe(existing_blockchain)
+                content = cls._ensure_vector_upserted(content=content)
+                if content.blockchain != previous_blockchain:
+                    content.save(update_fields=["blockchain", "updated_at"])
+                return content
+
             previous_blockchain = cls._json_safe(existing_blockchain)
             content = cls._ensure_vector_upserted(content=content)
             if content.blockchain != previous_blockchain:
@@ -83,7 +149,12 @@ class ContentBlockchainService:
                 file_name=file_name,
                 is_suspicious=False,
             )
-            verification = blockchain.verify_document(wm_id)
+            verification = cls._load_verification_snapshot(
+                blockchain=blockchain,
+                wm_id=wm_id,
+                expected_owner=recipient_address,
+                expected_status="Approved",
+            )
             token_info = (
                 blockchain.get_document_info(verification["token_id"])
                 if verification.get("exists") and verification.get("token_id")
@@ -114,7 +185,7 @@ class ContentBlockchainService:
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
             "recipient_address": recipient_address,
-            "owner_address": verification.get("owner") or recipient_address,
+            "owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
             "wm_id": wm_id,
             "token_id": verification.get("token_id"),
             "status": verification.get("status") or "Approved",
@@ -261,7 +332,12 @@ class ContentBlockchainService:
         wm_id = blockchain_data.get("wm_id") or cls._resolve_wm_id(content)
 
         try:
-            verification = blockchain.verify_document(wm_id)
+            verification = cls._load_verification_snapshot(
+                blockchain=blockchain,
+                wm_id=wm_id,
+                expected_owner=blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain, content=content),
+                expected_status="Pending",
+            )
             if not verification.get("exists") or not verification.get("token_id"):
                 raise AIIntegrationError(
                     error_code="BLOCKCHAIN_VOTE_NOT_FOUND",
@@ -316,7 +392,8 @@ class ContentBlockchainService:
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
             "recipient_address": blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain, content=content),
-            "owner_address": verification.get("owner") or blockchain_data.get("owner_address"),
+            "owner_address": cls._normalize_owner_address(verification.get("owner"))
+            or blockchain_data.get("owner_address"),
             "wm_id": wm_id,
             "token_id": token_id,
             "status": verification.get("status") or status_name,
@@ -835,6 +912,150 @@ class ContentBlockchainService:
 
         seed = str(payload_id or content.public_id)
         return max(1, zlib.crc32(seed.encode("utf-8")) & 0xFFFFFFFF)
+
+    @classmethod
+    def _normalize_owner_address(cls, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        if not normalized or normalized.lower() == cls.ZERO_ADDRESS:
+            return None
+        return normalized
+
+    @classmethod
+    def _load_verification_snapshot(
+        cls,
+        *,
+        blockchain,
+        wm_id: int,
+        expected_owner: str | None = None,
+        expected_status: str | None = None,
+        retries: int = 4,
+        delay_seconds: float = 0.3,
+    ) -> dict[str, Any]:
+        verification: dict[str, Any] = {}
+
+        for attempt in range(retries):
+            verification = blockchain.verify_document(wm_id) or {}
+            token_id = verification.get("token_id")
+            owner = cls._normalize_owner_address(verification.get("owner"))
+            exists = bool(verification.get("exists")) and bool(token_id)
+
+            if exists:
+                if verification.get("owner") and owner is None:
+                    cls._report_verification_snapshot_anomaly(
+                        code="verification_zero_owner_fallback",
+                        wm_id=wm_id,
+                        attempt=attempt + 1,
+                        verification=verification,
+                        expected_owner=expected_owner,
+                        expected_status=expected_status,
+                        severity="warning",
+                    )
+                return {
+                    **verification,
+                    "owner": owner or expected_owner,
+                }
+
+            try:
+                mapped_token_id = blockchain.get_token_id_by_wm_id(wm_id)
+            except Exception:
+                mapped_token_id = 0
+
+            if mapped_token_id:
+                cls._report_verification_snapshot_anomaly(
+                    code="verification_missing_token_fallback",
+                    wm_id=wm_id,
+                    attempt=attempt + 1,
+                    verification=verification,
+                    expected_owner=expected_owner,
+                    expected_status=expected_status,
+                    severity="warning",
+                    extra={"mapped_token_id": mapped_token_id},
+                )
+                return {
+                    **verification,
+                    "exists": True,
+                    "token_id": mapped_token_id,
+                    "owner": owner or expected_owner,
+                    "status": verification.get("status") or expected_status,
+                }
+
+            if attempt < retries - 1:
+                time.sleep(delay_seconds)
+
+        cls._report_verification_snapshot_anomaly(
+            code="verification_snapshot_unresolved",
+            wm_id=wm_id,
+            attempt=retries,
+            verification=verification,
+            expected_owner=expected_owner,
+            expected_status=expected_status,
+            severity="error",
+        )
+        return {
+            **verification,
+            "owner": cls._normalize_owner_address(verification.get("owner")) or expected_owner,
+            "status": verification.get("status") or expected_status,
+        }
+
+    @classmethod
+    def _report_verification_snapshot_anomaly(
+        cls,
+        *,
+        code: str,
+        wm_id: int,
+        attempt: int,
+        verification: dict[str, Any],
+        expected_owner: str | None,
+        expected_status: str | None,
+        severity: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        capture_sentry_message(
+            f"blockchain.{code}",
+            level=severity,
+            tags={
+                "component": "content_blockchain_service",
+                "anomaly_code": code,
+            },
+            extra={
+                "wm_id": wm_id,
+                "attempt": attempt,
+                "verification_exists": verification.get("exists"),
+                "verification_token_id": verification.get("token_id"),
+                "verification_owner": verification.get("owner"),
+                "verification_status": verification.get("status"),
+                "expected_owner": expected_owner,
+                "expected_status": expected_status,
+                **(extra or {}),
+            },
+        )
+
+    @classmethod
+    def _report_blockchain_anomaly(
+        cls,
+        *,
+        code: str,
+        content: Content,
+        severity: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        capture_sentry_message(
+            f"blockchain.{code}",
+            level=severity,
+            tags={
+                "component": "content_blockchain_service",
+                "anomaly_code": code,
+            },
+            extra={
+                "content_id": str(content.public_id),
+                "owner_id": getattr(content.owner, "id", None),
+                "decision": content.decision,
+                "status": content.status,
+                **(extra or {}),
+            },
+        )
 
     @classmethod
     def _build_vote_payload(cls, *, content: Content, token_id: int, status_name: str, token_info: dict[str, Any]) -> dict[str, Any]:

@@ -349,6 +349,116 @@ class ContentBlockchainFilenameTests(TestCase):
         self.assertEqual(updated.blockchain["file_name"], "minted-name.png")
         self.assertEqual(updated.blockchain["document"]["file_name"], "minted-name.png")
 
+    @patch.object(ContentBlockchainService, "_ensure_vector_upserted", side_effect=lambda *, content: content)
+    @patch.object(ContentBlockchainService, "_load_watermarked_bytes", return_value=b"watermarked-bytes")
+    @patch("contents.blockchain_service.time.sleep", return_value=None)
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_mint_falls_back_when_verification_snapshot_is_delayed(
+        self,
+        mocked_create_client,
+        _mocked_sleep,
+        _mocked_load_bytes,
+        _mocked_upsert,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 137
+        blockchain.contract_address = "0xabc"
+        blockchain.compute_file_hash_sha256.return_value = b"\x12" * 32
+        blockchain.mint_document_with_metadata.return_value = {
+            "tx_hash": "0xtx-delayed",
+            "block_number": 12,
+            "gas_used": 12345,
+            "token_uri": "ipfs://token-delayed",
+        }
+        blockchain.verify_document.side_effect = [
+            {
+                "exists": False,
+                "token_id": 0,
+                "owner": "0x0000000000000000000000000000000000000000",
+                "status": "",
+                "verification_link": "",
+                "author_name": "",
+                "file_name": "",
+            },
+            {
+                "exists": True,
+                "token_id": 14,
+                "owner": "0x0000000000000000000000000000000000000000",
+                "status": "Approved",
+                "verification_link": "https://example.com/verify/14",
+                "author_name": "Chain User",
+                "file_name": "origin-name.png",
+            },
+        ]
+        blockchain.get_token_id_by_wm_id.return_value = 14
+        blockchain.get_document_info.return_value = {
+            "status": "Approved",
+            "upvotes": 0,
+            "downvotes": 0,
+            "end_time": 0,
+            "file_hash": b"\x12" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "origin-name.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="allow", status="allow", filename="origin-name.png")
+        updated = ContentBlockchainService.mint(content=content)
+
+        self.assertEqual(updated.blockchain["token_id"], 14)
+        self.assertEqual(updated.blockchain["owner_address"], "0x1234567890123456789012345678901234567890")
+        self.assertEqual(updated.blockchain["recipient_address"], "0x1234567890123456789012345678901234567890")
+
+    @patch.object(ContentBlockchainService, "_ensure_vector_upserted", side_effect=lambda *, content: content)
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_mint_repairs_existing_broken_mint_record_without_reminting(
+        self,
+        mocked_create_client,
+        _mocked_upsert,
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 137
+        blockchain.contract_address = "0xabc"
+        blockchain.verify_document.return_value = {
+            "exists": True,
+            "token_id": 21,
+            "owner": "0x0000000000000000000000000000000000000000",
+            "status": "Approved",
+            "verification_link": "https://example.com/verify/21",
+            "author_name": "Chain User",
+            "file_name": "broken-name.png",
+        }
+        blockchain.get_token_id_by_wm_id.return_value = 21
+        blockchain.get_document_info.return_value = {
+            "status": "Approved",
+            "upvotes": 0,
+            "downvotes": 0,
+            "end_time": 0,
+            "file_hash": b"\x13" * 32,
+            "timestamp": 1710000000,
+            "author_name": "Chain User",
+            "file_name": "broken-name.png",
+        }
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(decision="allow", status="allow", filename="broken-name.png")
+        content.blockchain = {
+            "minted": True,
+            "mint_kind": "content",
+            "tx_hash": "0xexisting",
+            "wm_id": 4242,
+            "token_id": 0,
+            "owner_address": "0x0000000000000000000000000000000000000000",
+        }
+        content.save(update_fields=["blockchain", "updated_at"])
+
+        updated = ContentBlockchainService.mint(content=content)
+
+        blockchain.mint_document_with_metadata.assert_not_called()
+        self.assertEqual(updated.blockchain["token_id"], 21)
+        self.assertEqual(updated.blockchain["owner_address"], "0x1234567890123456789012345678901234567890")
+
     @patch("contents.blockchain_service.urlopen")
     def test_load_watermarked_bytes_supports_absolute_output_url(
         self,
