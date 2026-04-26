@@ -4,11 +4,13 @@ from contextvars import ContextVar
 
 
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
+response_id_context: ContextVar[str] = ContextVar("response_id", default="-")
 
 
 class RequestIdFilter:
     def filter(self, record) -> bool:
         record.request_id = request_id_context.get("-")
+        record.response_id = response_id_context.get("-")
         return True
 
 
@@ -64,7 +66,7 @@ def build_logging_config(*, default_level: str = "INFO") -> dict:
         },
         "formatters": {
             "standard": {
-                "format": "%(asctime)s %(levelname)s [%(request_id)s] %(name)s:%(lineno)d %(message)s",
+                "format": "%(asctime)s %(levelname)s [req=%(request_id)s res=%(response_id)s] %(name)s:%(lineno)d %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },

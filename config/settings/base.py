@@ -2,6 +2,7 @@ from pathlib import Path
 import environ
 
 from config.logging import build_logging_config
+from config.sentry import init_sentry
 
 
 def _find_project_base() -> Path:
@@ -183,6 +184,10 @@ BLOCKCHAIN_INTEGRATION_ROOT = env(
 VERIMARKA_PUBLIC_BASE_URL = env("VERIMARKA_PUBLIC_BASE_URL", default="https://verimarka.com")
 WATSON_RECIPIENT_ADDRESS = env("WATSON_RECIPIENT_ADDRESS", default="")
 BLOCKCHAIN_EVENT_SYNC_SECRET = env("BLOCKCHAIN_EVENT_SYNC_SECRET", default="")
+SENTRY_DSN = env("SENTRY_DSN", default="")
+SENTRY_ENVIRONMENT = env("SENTRY_ENVIRONMENT", default="development" if DEBUG else "production")
+SENTRY_RELEASE = env("SENTRY_RELEASE", default="")
+SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0)
 
 AWS_S3_ENABLED = env.bool("AWS_S3_ENABLED", default=False)
 AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default="")
@@ -201,3 +206,10 @@ CONTENT_VERIFY_PREFIX = env("CONTENT_VERIFY_PREFIX", default="verify")
 DJANGO_LOG_LEVEL = env("DJANGO_LOG_LEVEL", default="INFO").upper()
 
 LOGGING = build_logging_config(default_level=DJANGO_LOG_LEVEL)
+
+init_sentry(
+    dsn=SENTRY_DSN,
+    environment=SENTRY_ENVIRONMENT,
+    release=SENTRY_RELEASE or None,
+    traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+)
