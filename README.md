@@ -145,18 +145,24 @@ docker compose -f docker-compose.prod.yml up -d --build
 선택 GitHub Secrets:
 - `BACKEND_DEPLOY_BRANCH`
 - `BACKEND_HEALTHCHECK_URL`
+- `BACKEND_HEALTHCHECK_RETRIES`
+- `BACKEND_HEALTHCHECK_INTERVAL_SECONDS`
 
 권장 운영값:
 - `BACKEND_DEPLOY_BRANCH`: `main`
 - `BACKEND_DEPLOY_PATH`: 운영 서버의 `verimarka-BACKEND` 리포지토리 경로
   예: `/opt/verimarka/verimarka-BACKEND`
 - `BACKEND_HEALTHCHECK_URL`: 배포 후 확인할 API 주소
-  예: `https://verimarka.com/api/`
+  예: `https://verimarka.com/api/health/`
+- `BACKEND_HEALTHCHECK_RETRIES`: 헬스체크 재시도 횟수
+- `BACKEND_HEALTHCHECK_INTERVAL_SECONDS`: 헬스체크 재시도 간격(초)
 
 주의:
 - 운영 서버의 `BACKEND_DEPLOY_PATH` 는 이미 `origin` 이 `WATSON-AJOU/WATSON-BACKEND` 로 연결되어 있어야 합니다.
 - 운영 서버에 `docker`, `docker compose`, `git`, `curl` 이 설치되어 있어야 합니다.
 - 운영용 `.env.prod` 는 서버에만 두고 GitHub Secrets 로 올리지 않는 전제를 사용합니다.
+- 배포 중 `git pull`, `docker compose up -d --build`, `BACKEND_HEALTHCHECK_URL` 검증 중 하나라도 실패하면 직전 git SHA로 자동 롤백합니다.
+- 기본 헬스 엔드포인트는 `GET /api/health/` 입니다.
 
 ## 운영 인증서 발급 / 갱신
 

@@ -37,19 +37,56 @@ jobs:
           DEPLOY_PATH: ${{ secrets.BACKEND_DEPLOY_PATH }}
           DEPLOY_BRANCH: ${{ secrets.BACKEND_DEPLOY_BRANCH }}
           HEALTHCHECK_URL: ${{ secrets.BACKEND_HEALTHCHECK_URL }}
+          HEALTHCHECK_RETRIES: ${{ secrets.BACKEND_HEALTHCHECK_RETRIES }}
+          HEALTHCHECK_INTERVAL_SECONDS: ${{ secrets.BACKEND_HEALTHCHECK_INTERVAL_SECONDS }}
         run: |
-          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL}'; bash -s" <<'EOF'
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL:-https://verimarka.com/api/health/}' HEALTHCHECK_RETRIES='${HEALTHCHECK_RETRIES:-10}' HEALTHCHECK_INTERVAL_SECONDS='${HEALTHCHECK_INTERVAL_SECONDS:-5}'; bash -s" <<'EOF'
           set -euo pipefail
 
+          rollback_executed=0
+
+          run_healthcheck() {
+            if [ -z "${HEALTHCHECK_URL}" ]; then
+              return 0
+            fi
+
+            local retries="${HEALTHCHECK_RETRIES:-10}"
+            local interval="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
+            local attempt
+
+            for attempt in $(seq 1 "${retries}"); do
+              if curl -fsS --max-time 10 "${HEALTHCHECK_URL}" >/dev/null; then
+                echo "Healthcheck passed on attempt ${attempt}/${retries}"
+                return 0
+              fi
+              echo "Healthcheck failed on attempt ${attempt}/${retries}"
+              sleep "${interval}"
+            done
+
+            return 1
+          }
+
+          rollback() {
+            if [ "${rollback_executed}" -eq 1 ]; then
+              return
+            fi
+
+            rollback_executed=1
+            echo "Deployment failed. Rolling back to ${PREVIOUS_SHA}"
+            git fetch origin
+            git checkout "${PREVIOUS_SHA}"
+            docker compose -f docker-compose.prod.yml up -d --build
+          }
+
+          trap 'status=$?; rollback; exit "${status}"' ERR
+
           cd "${DEPLOY_PATH}"
+          PREVIOUS_SHA="$(git rev-parse HEAD)"
 
           git fetch origin
           git checkout "${DEPLOY_BRANCH}"
           git pull --ff-only origin "${DEPLOY_BRANCH}"
 
           docker compose -f docker-compose.prod.yml up -d --build
-
-          if [ -n "${HEALTHCHECK_URL}" ]; then
-            curl -fsS "${HEALTHCHECK_URL}" >/dev/null
-          fi
+          run_healthcheck
           EOF
