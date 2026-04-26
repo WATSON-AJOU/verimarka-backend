@@ -5,7 +5,8 @@ services:
       context: ..
       dockerfile: verimarka-BACKEND/Dockerfile
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     env_file:
       - .env.prod
     environment:
@@ -24,7 +25,8 @@ services:
       context: ..
       dockerfile: verimarka-BACKEND/Dockerfile
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     env_file:
       - .env.prod
     environment:
@@ -43,6 +45,12 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
     restart: unless-stopped
 
   verimarka-nginx:
