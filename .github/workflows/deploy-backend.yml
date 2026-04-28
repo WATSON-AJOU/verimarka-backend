@@ -40,7 +40,7 @@ jobs:
           HEALTHCHECK_RETRIES: ${{ secrets.BACKEND_HEALTHCHECK_RETRIES }}
           HEALTHCHECK_INTERVAL_SECONDS: ${{ secrets.BACKEND_HEALTHCHECK_INTERVAL_SECONDS }}
         run: |
-          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL:-https://verimarka.com/api/health/}' HEALTHCHECK_RETRIES='${HEALTHCHECK_RETRIES:-10}' HEALTHCHECK_INTERVAL_SECONDS='${HEALTHCHECK_INTERVAL_SECONDS:-5}'; bash -s" <<'EOF'
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL:-https://verimarka.com/api/health/}' HEALTHCHECK_RETRIES='${HEALTHCHECK_RETRIES:-30}' HEALTHCHECK_INTERVAL_SECONDS='${HEALTHCHECK_INTERVAL_SECONDS:-5}'; bash -s" <<'EOF'
           set -euo pipefail
 
           rollback_executed=0
@@ -50,7 +50,7 @@ jobs:
               return 0
             fi
 
-            local retries="${HEALTHCHECK_RETRIES:-10}"
+            local retries="${HEALTHCHECK_RETRIES:-30}"
             local interval="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
             local attempt
 
