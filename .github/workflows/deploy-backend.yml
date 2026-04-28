@@ -46,10 +46,28 @@ jobs:
           rollback_executed=0
 
           refresh_proxy() {
-            docker compose -f docker-compose.prod.yml up -d --force-recreate verimarka-nginx
+            docker compose -f docker-compose.prod.yml exec -T verimarka-nginx nginx -s reload
           }
 
-          run_healthcheck() {
+          run_api_healthcheck() {
+            local retries="${HEALTHCHECK_RETRIES:-30}"
+            local interval="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
+            local attempt
+
+            for attempt in $(seq 1 "${retries}"); do
+              if docker compose -f docker-compose.prod.yml exec -T verimarka-api \
+                python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=10).read()" >/dev/null; then
+                echo "API healthcheck passed on attempt ${attempt}/${retries}"
+                return 0
+              fi
+              echo "API healthcheck failed on attempt ${attempt}/${retries}"
+              sleep "${interval}"
+            done
+
+            return 1
+          }
+
+          run_public_healthcheck() {
             if [ -z "${HEALTHCHECK_URL}" ]; then
               return 0
             fi
@@ -60,10 +78,10 @@ jobs:
 
             for attempt in $(seq 1 "${retries}"); do
               if curl -fsS --max-time 10 "${HEALTHCHECK_URL}" >/dev/null; then
-                echo "Healthcheck passed on attempt ${attempt}/${retries}"
+                echo "Public healthcheck passed on attempt ${attempt}/${retries}"
                 return 0
               fi
-              echo "Healthcheck failed on attempt ${attempt}/${retries}"
+              echo "Public healthcheck failed on attempt ${attempt}/${retries}"
               sleep "${interval}"
             done
 
@@ -93,6 +111,7 @@ jobs:
           git pull --ff-only origin "${DEPLOY_BRANCH}"
 
           docker compose -f docker-compose.prod.yml up -d --build
+          run_api_healthcheck
           refresh_proxy
-          run_healthcheck
+          run_public_healthcheck
           EOF
