@@ -56,7 +56,7 @@ jobs:
 
             for attempt in $(seq 1 "${retries}"); do
               if docker compose -f docker-compose.prod.yml exec -T verimarka-api \
-                python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=10).read()" >/dev/null; then
+                python -c "import urllib.request; req = urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host': 'verimarka.com'}); urllib.request.urlopen(req, timeout=10).read()" >/dev/null; then
                 echo "API healthcheck passed on attempt ${attempt}/${retries}"
                 return 0
               fi
