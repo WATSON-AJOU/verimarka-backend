@@ -45,6 +45,10 @@ jobs:
 
           rollback_executed=0
 
+          refresh_proxy() {
+            docker compose -f docker-compose.prod.yml up -d --force-recreate verimarka-nginx
+          }
+
           run_healthcheck() {
             if [ -z "${HEALTHCHECK_URL}" ]; then
               return 0
@@ -76,6 +80,7 @@ jobs:
             git fetch origin
             git checkout "${PREVIOUS_SHA}"
             docker compose -f docker-compose.prod.yml up -d --build
+            refresh_proxy
           }
 
           trap 'status=$?; rollback; exit "${status}"' ERR
@@ -88,5 +93,6 @@ jobs:
           git pull --ff-only origin "${DEPLOY_BRANCH}"
 
           docker compose -f docker-compose.prod.yml up -d --build
+          refresh_proxy
           run_healthcheck
           EOF
