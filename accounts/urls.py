@@ -9,7 +9,7 @@ from .views.views_admin import (
     AdminVoteDetailView,
     AdminVoteListView,
 )
-from .views.views_oauth import GoogleOAuthLoginView, KakaoOAuthLoginView
+from .views.views_oauth import AppleOAuthLoginView, GoogleOAuthLoginView, KakaoOAuthLoginView
 from .views.views_sms import PhoneSendCodeView, PhoneVerifyCodeView
 from .views.views_email import EmailSendCodeView, EmailVerifyCodeView
 from .views.views_auth import AdminLoginView, AdminMeView, LoginView, SignupView
@@ -29,6 +29,7 @@ urlpatterns = [
     path("display-name-availability/", DisplayNameAvailabilityView.as_view(), name="display_name_availability"),
     path("auth/oauth/google/", GoogleOAuthLoginView.as_view(), name="oauth_google"),
     path("auth/oauth/kakao/", KakaoOAuthLoginView.as_view(), name="oauth_kakao"),
+    path("auth/oauth/apple/", AppleOAuthLoginView.as_view(), name="oauth_apple"),
     path("phone/send-code/", PhoneSendCodeView.as_view(), name="phone_send_code"),
     path("phone/verify-code/", PhoneVerifyCodeView.as_view(), name="phone_verify_code"),
     path("email/send-code/", EmailSendCodeView.as_view(), name="email_send_code"),

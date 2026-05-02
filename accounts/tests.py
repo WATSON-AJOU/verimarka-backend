@@ -93,3 +93,40 @@ class OAuthAccountLinkingTests(TestCase):
                 provider_sub="999999",
             ).exists()
         )
+
+    @patch("accounts.views.views_oauth.apple_verify_identity_token")
+    @patch("accounts.views.views_oauth.apple_exchange_code_for_token")
+    def test_apple_oauth_links_existing_user_by_email(self, mock_exchange, mock_verify):
+        user = User.objects.create_user(
+            username="existing-apple-user",
+            email="apple@example.com",
+            password="Password123",
+            nickname="applenick",
+            display_name="Apple User",
+        )
+
+        mock_exchange.return_value = {"id_token": "apple-id-token"}
+        mock_verify.return_value = {
+            "sub": "apple-sub-123",
+            "email": "apple@example.com",
+        }
+
+        response = self.client.post(
+            "/api/accounts/auth/oauth/apple/",
+            {
+                "code": "apple-auth-code",
+                "redirect_uri": "https://verimarka.com/auth/apple/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["created"])
+        self.assertEqual(response.data["user"]["id"], user.id)
+        self.assertTrue(
+            SocialAccount.objects.filter(
+                user=user,
+                provider="apple",
+                provider_sub="apple-sub-123",
+            ).exists()
+        )

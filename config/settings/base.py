@@ -156,6 +156,19 @@ GOOGLE_USERINFO_URI = env(
 KAKAO_REST_API_KEY = env("KAKAO_REST_API_KEY", default="")
 KAKAO_CLIENT_SECRET = env("KAKAO_CLIENT_SECRET", default="")
 
+APPLE_TEAM_ID = env("APPLE_TEAM_ID", default="")
+APPLE_SERVICES_ID = env("APPLE_SERVICES_ID", default="")
+APPLE_KEY_ID = env("APPLE_KEY_ID", default="")
+APPLE_PRIVATE_KEY = env("APPLE_PRIVATE_KEY", default="")
+APPLE_TOKEN_URI = env(
+    "APPLE_TOKEN_URI",
+    default="https://appleid.apple.com/auth/token",
+)
+APPLE_JWKS_URI = env(
+    "APPLE_JWKS_URI",
+    default="https://appleid.apple.com/auth/keys",
+)
+
 SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
 SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")
 SOLAPI_SENDER = env("SOLAPI_SENDER", default="")

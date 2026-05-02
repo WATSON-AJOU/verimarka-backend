@@ -21,6 +21,11 @@ from ..services.kakao_oauth import (
     fetch_userinfo as kakao_fetch_userinfo,
     KakaoOAuthError,
 )
+from ..services.apple_oauth import (
+    exchange_code_for_token as apple_exchange_code_for_token,
+    verify_identity_token as apple_verify_identity_token,
+    AppleOAuthError,
+)
 
 
 User = get_user_model()
@@ -255,6 +260,81 @@ class KakaoOAuthLoginView(APIView):
             with transaction.atomic():
                 user, social, created, error_response = _get_or_create_social_user(
                     provider="kakao",
+                    sub=sub,
+                    email=email,
+                )
+                if error_response is not None:
+                    return error_response
+
+                if email and user.email != email:
+                    user.email = email
+                    user.save(update_fields=["email"])
+
+                social.last_login_at = timezone.now()
+                social.save(update_fields=["last_login_at"])
+                _record_social_login_success(request, user)
+
+        except IntegrityError:
+            return Response(
+                {"detail": "user creation failed"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": MeSerializer(user).data,
+                "created": created,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AppleOAuthLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        code = request.data.get("code")
+        redirect_uri = request.data.get("redirect_uri")
+
+        if not code or not redirect_uri:
+            return Response(
+                {"detail": "code and redirect_uri are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            token_data = apple_exchange_code_for_token(code, redirect_uri)
+            identity_token = token_data.get("id_token")
+            if not identity_token:
+                return Response(
+                    {"detail": "no id_token from apple"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            profile = apple_verify_identity_token(identity_token)
+
+        except AppleOAuthError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sub = profile.get("sub")
+        email = profile.get("email")
+
+        if not sub:
+            return Response(
+                {"detail": "apple sub missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                user, social, created, error_response = _get_or_create_social_user(
+                    provider="apple",
                     sub=sub,
                     email=email,
                 )
