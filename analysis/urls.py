@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AIJobDetailView, GuardAnalyzeView
+from .api.views import AIJobDetailView, GuardAnalyzeView
 
 
 urlpatterns = [

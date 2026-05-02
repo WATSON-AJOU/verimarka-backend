@@ -5,7 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 
 
 logger = logging.getLogger(__name__)

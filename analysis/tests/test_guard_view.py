@@ -12,7 +12,7 @@ from analysis.contracts import (
     GuardTimingV1,
     GuardWatermarkResultV1,
 )
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 
 
 User = get_user_model()
@@ -32,7 +32,7 @@ class GuardAnalyzeViewTests(TestCase):
         )
         self.client.force_authenticate(user=self.user)
 
-    @patch("analysis.views.AnalysisGuardService.run_guard_v1")
+    @patch("analysis.api.views.AnalysisGuardService.run_guard_v1")
     def test_guard_endpoint_returns_success_payload(self, mocked_run_guard):
         mocked_run_guard.return_value = GuardResponseV1(
             job_id="job-1",
@@ -101,7 +101,7 @@ class GuardAnalyzeViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error_code"], "INVALID_INPUT")
 
-    @patch("analysis.views.AnalysisGuardService.run_guard_v1")
+    @patch("analysis.api.views.AnalysisGuardService.run_guard_v1")
     def test_guard_endpoint_formats_ai_integration_error(self, mocked_run_guard):
         mocked_run_guard.side_effect = AIIntegrationError(
             error_code="AI_TIMEOUT",
@@ -128,7 +128,7 @@ class GuardAnalyzeViewTests(TestCase):
         self.assertEqual(response.json()["error_code"], "AI_TIMEOUT")
         self.assertTrue(response.json()["retryable"])
 
-    @patch("analysis.views.AnalysisGuardService.run_guard_v1")
+    @patch("analysis.api.views.AnalysisGuardService.run_guard_v1")
     def test_guard_endpoint_formats_unhandled_exception_as_json(self, mocked_run_guard):
         mocked_run_guard.side_effect = RuntimeError("unexpected boom")
 

@@ -15,8 +15,8 @@ class OAuthAccountLinkingTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    @patch("accounts.views.views_oauth.fetch_userinfo")
-    @patch("accounts.views.views_oauth.exchange_code_for_token")
+    @patch("accounts.api.views_oauth.fetch_userinfo")
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
     def test_google_oauth_links_existing_user_by_email(self, mock_exchange, mock_userinfo):
         user = User.objects.create_user(
             username="existing-user",
@@ -55,8 +55,8 @@ class OAuthAccountLinkingTests(TestCase):
             ).exists()
         )
 
-    @patch("accounts.views.views_oauth.kakao_fetch_userinfo")
-    @patch("accounts.views.views_oauth.kakao_exchange_code_for_token")
+    @patch("accounts.api.views_oauth.kakao_fetch_userinfo")
+    @patch("accounts.api.views_oauth.kakao_exchange_code_for_token")
     def test_kakao_oauth_links_existing_user_by_email(self, mock_exchange, mock_userinfo):
         user = User.objects.create_user(
             username="existing-kakao-user",
@@ -94,8 +94,8 @@ class OAuthAccountLinkingTests(TestCase):
             ).exists()
         )
 
-    @patch("accounts.views.views_oauth.apple_verify_identity_token")
-    @patch("accounts.views.views_oauth.apple_exchange_code_for_token")
+    @patch("accounts.api.views_oauth.apple_verify_identity_token")
+    @patch("accounts.api.views_oauth.apple_exchange_code_for_token")
     def test_apple_oauth_links_existing_user_by_email(self, mock_exchange, mock_verify):
         user = User.objects.create_user(
             username="existing-apple-user",

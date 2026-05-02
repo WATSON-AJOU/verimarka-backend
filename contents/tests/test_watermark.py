@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 from contents.models import Content
 from contents.watermark_service import ContentWatermarkService
 

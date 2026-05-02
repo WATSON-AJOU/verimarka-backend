@@ -7,7 +7,7 @@ from rest_framework.exceptions import ErrorDetail, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 
 
 logger = logging.getLogger(__name__)

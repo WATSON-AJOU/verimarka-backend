@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from contents.models import Content
-from contents.services import ContentRegistrationService
+from contents.api.services import ContentRegistrationService
 from contents.verification_service import ContentVerificationService
 
 

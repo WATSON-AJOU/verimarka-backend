@@ -27,11 +27,11 @@ class ContentRegisterViewTests(TestCase):
         )
         self.client.force_authenticate(user=self.user)
 
-    @patch("contents.views.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.upload_file")
-    @patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
-    @patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch("contents.api.services.registration.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
+    @patch("contents.api.services.registration.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
     @patch("analysis.tasks.run_register_analysis_job.delay")
     def test_register_image_enqueues_async_job(self, mocked_delay, *_mocks):
         mocked_delay.return_value.id = "celery-task-1"
@@ -59,11 +59,11 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Content.objects.count(), 0)
 
-    @patch("contents.views.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.upload_file")
-    @patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.pdf")
-    @patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/document/register_request/1/test/file.pdf")
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch("contents.api.services.registration.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.pdf")
+    @patch("contents.api.services.registration.S3StorageService.build_s3_uri", return_value="s3://bucket/document/register_request/1/test/file.pdf")
     @patch("analysis.tasks.run_register_analysis_job.delay")
     def test_register_accepts_document_file(self, mocked_delay, *_mocks):
         mocked_delay.return_value.id = "celery-task-doc-1"
@@ -76,11 +76,11 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(content.content_type, "document")
         self.assertEqual(content.mime_type, "application/pdf")
 
-    @patch("contents.views.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.upload_file")
-    @patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
-    @patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch("contents.api.services.registration.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
+    @patch("contents.api.services.registration.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
     @patch("analysis.tasks.run_register_analysis_job.delay")
     def test_register_sanitizes_filename_before_persisting(self, mocked_delay, *_mocks):
         mocked_delay.return_value.id = "celery-task-1"
@@ -103,11 +103,11 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("확장자와 MIME", str(response.json()))
 
-    @patch("contents.views.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.is_enabled", return_value=True)
-    @patch("contents.services.S3StorageService.upload_file")
-    @patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
-    @patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.is_enabled", return_value=True)
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch("contents.api.services.registration.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.png")
+    @patch("contents.api.services.registration.S3StorageService.build_s3_uri", return_value="s3://bucket/original/1/test/file.png")
     @patch("analysis.tasks.run_register_analysis_job.delay")
     def test_register_blocks_duplicate_source_after_success(self, mocked_delay, *_mocks):
         mocked_delay.return_value.id = "celery-task-1"

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AnalysisHistoryView, PublicRecentActivityView
+from .api.views import AnalysisHistoryView, PublicRecentActivityView
 
 
 urlpatterns = [

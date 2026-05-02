@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from analysis.contracts import GuardRequestV1
-from analysis.services import AIIntegrationError, AnalysisGuardService
+from analysis.api.services import AIIntegrationError, AnalysisGuardService
 from analysis.watermark_services import WatermarkAIService
 
 from .blockchain_service import ContentBlockchainService
@@ -15,7 +15,7 @@ from .document_service import ContentDocumentAIService
 from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
 from .input_safety import resolve_content_type_from_mime
 from .models import Content
-from .services import ContentRegistrationService
+from .api.services import ContentRegistrationService
 from .storage import S3StorageService
 
 logger = logging.getLogger(__name__)

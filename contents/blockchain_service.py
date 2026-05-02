@@ -12,7 +12,7 @@ from urllib.request import urlopen
 from django.conf import settings
 from django.utils import timezone
 
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 from accounts.services.email_service import EmailSendError, send_review_vote_result_email
 from config.sentry import capture_sentry_message
 

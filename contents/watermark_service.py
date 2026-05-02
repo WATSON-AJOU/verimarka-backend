@@ -4,7 +4,7 @@ from pathlib import Path
 from django.conf import settings
 from django.db import transaction
 
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 from analysis.watermark_services import WatermarkAIService
 from contents.blockchain_service import ContentBlockchainService
 from .models import Content

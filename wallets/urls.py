@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import WalletConnectChallengeView, WalletConnectVerifyView, WalletLinkView, WalletSummaryView
+from .api.views import WalletConnectChallengeView, WalletConnectVerifyView, WalletLinkView, WalletSummaryView
 
 
 urlpatterns = [

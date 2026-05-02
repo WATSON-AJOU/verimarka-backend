@@ -5,9 +5,9 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from analysis.models import AIJob
-from analysis.services import AIIntegrationError
+from analysis.api.services import AIIntegrationError
 from contents.models import Content
-from contents.services import ContentRegistrationService
+from contents.api.services import ContentRegistrationService
 from contents.verification_service import ContentVerificationService
 from contents.watermark_service import ContentWatermarkService
 from logs.models import VerificationHistoryLog

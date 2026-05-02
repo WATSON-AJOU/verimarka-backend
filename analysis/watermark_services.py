@@ -6,7 +6,7 @@ from typing import Any
 from django.conf import settings
 from pydantic import BaseModel, Field, ValidationError
 
-from .services import AIIntegrationError
+from .api.services import AIIntegrationError
 
 
 class WatermarkMediaInput(BaseModel):

@@ -1,6 +1,6 @@
 from django.urls import path
-from .views.views import DisplayNameAvailabilityView, MeView, NicknameAvailabilityView, WithdrawView
-from .views.views_admin import (
+from .api.views import DisplayNameAvailabilityView, MeView, NicknameAvailabilityView, WithdrawView
+from .api.views import (
     AdminDashboardView,
     AdminImageDetailView,
     AdminImageListView,
@@ -9,10 +9,10 @@ from .views.views_admin import (
     AdminVoteDetailView,
     AdminVoteListView,
 )
-from .views.views_oauth import AppleOAuthLoginView, GoogleOAuthLoginView, KakaoOAuthLoginView
-from .views.views_sms import PhoneSendCodeView, PhoneVerifyCodeView
-from .views.views_email import EmailSendCodeView, EmailVerifyCodeView
-from .views.views_auth import AdminLoginView, AdminMeView, LoginView, SignupView
+from .api.views import AppleOAuthLoginView, GoogleOAuthLoginView, KakaoOAuthLoginView
+from .api.views import PhoneSendCodeView, PhoneVerifyCodeView
+from .api.views import EmailSendCodeView, EmailVerifyCodeView
+from .api.views import AdminLoginView, AdminMeView, LoginView, SignupView
 
 urlpatterns = [
     path("admin/dashboard/", AdminDashboardView.as_view(), name="admin_dashboard"),
