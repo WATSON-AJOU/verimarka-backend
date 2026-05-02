@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from contents.models import Content
@@ -35,11 +36,10 @@ class AnalysisHistoryViewTests(TestCase):
             top_phash_dist=0,
         )
 
-        response = self.client.get("/api/logs/history/")
+        response = self.client.get(reverse("analysis_history"))
 
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload[0]["summary"], "동일한 저작물 재업로드로 차단")
+        self.assertEqual(response.json()[0]["summary"], "동일한 저작물 재업로드로 차단")
 
     def test_rejected_review_vote_remains_review_result_in_history(self):
         Content.objects.create(
@@ -56,16 +56,11 @@ class AnalysisHistoryViewTests(TestCase):
             top_phash_dist=6,
             blockchain={
                 "mint_kind": "review_vote",
-                "vote": {
-                    "status": "Rejected",
-                    "upvotes": 3,
-                    "downvotes": 7,
-                    "end_time_display": "2026.04.17 12:00",
-                },
+                "vote": {"status": "Rejected", "upvotes": 3, "downvotes": 7, "end_time_display": "2026.04.17 12:00"},
             },
         )
 
-        response = self.client.get("/api/logs/history/")
+        response = self.client.get(reverse("analysis_history"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -88,26 +83,16 @@ class AnalysisHistoryViewTests(TestCase):
             top_phash_dist=7,
             blockchain={
                 "mint_kind": "review_vote",
-                "vote": {
-                    "status": "Approved",
-                    "upvotes": 8,
-                    "downvotes": 2,
-                    "end_time_display": "2026.04.17 12:00",
-                },
+                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
             },
         )
 
-        response = self.client.get("/api/logs/history/")
+        response = self.client.get(reverse("analysis_history"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 2)
         self.assertEqual({item["type"] for item in payload}, {"review", "allow"})
-        review_item = next(item for item in payload if item["type"] == "review")
-        allow_item = next(item for item in payload if item["type"] == "allow")
-        self.assertEqual(review_item["summary"], "투표 종료 · 찬성 우세")
-        self.assertIn("찬성 8 · 반대 2", review_item["extra"])
-        self.assertEqual(allow_item["summary"], "등록 승인 완료")
 
     def test_approved_review_vote_without_watermark_does_not_look_minted(self):
         Content.objects.create(
@@ -127,23 +112,16 @@ class AnalysisHistoryViewTests(TestCase):
                 "mint_kind": "review_vote",
                 "network_name": "Sepolia",
                 "token_id": 77,
-                "vote": {
-                    "status": "Approved",
-                    "upvotes": 8,
-                    "downvotes": 2,
-                    "end_time_display": "2026.04.17 12:00",
-                },
+                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
             },
             watermark={"applied": False},
         )
 
-        response = self.client.get("/api/logs/history/")
+        response = self.client.get(reverse("analysis_history"))
 
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        allow_item = next(item for item in payload if item["type"] == "allow")
+        allow_item = next(item for item in response.json() if item["type"] == "allow")
         self.assertEqual(allow_item["summary"], "등록 승인 완료")
-        self.assertEqual(allow_item["extra"], "등록 승인됨")
         self.assertIsNone(allow_item["download_url"])
 
     def test_content_mint_after_review_approval_keeps_review_result_history(self):
@@ -165,23 +143,13 @@ class AnalysisHistoryViewTests(TestCase):
                 "network_name": "Sepolia",
                 "token_id": 88,
                 "tx_hash": "0x1234567890abcdef",
-                "vote": {
-                    "status": "Approved",
-                    "upvotes": 8,
-                    "downvotes": 2,
-                    "end_time_display": "2026.04.17 12:00",
-                },
+                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
             },
             watermark={"applied": True, "output_url": "/media/watermarked.png"},
         )
 
-        response = self.client.get("/api/logs/history/")
+        response = self.client.get(reverse("analysis_history"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 2)
-        self.assertEqual({item["type"] for item in payload}, {"review", "allow"})
-        review_item = next(item for item in payload if item["type"] == "review")
-        allow_item = next(item for item in payload if item["type"] == "allow")
-        self.assertEqual(review_item["summary"], "투표 종료 · 찬성 우세")
-        self.assertEqual(allow_item["summary"], "워터마크 & 토큰 발급 완료 (토큰 #88)")

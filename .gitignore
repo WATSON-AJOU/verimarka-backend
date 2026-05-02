@@ -9,3 +9,5 @@ __pycache__/
 *.pyd
 .env.dev
 .env.prod
+
+.agents/skills/testing/*

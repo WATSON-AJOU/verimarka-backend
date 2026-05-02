@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 
@@ -22,7 +23,7 @@ class WalletExceptionHandlerTests(TestCase):
 
     def test_wallet_challenge_validation_error_keeps_field_errors_and_standard_fields(self):
         response = self.client.post(
-            "/api/wallets/connect/challenge/",
+            reverse("wallet_connect_challenge"),
             {},
             format="json",
         )

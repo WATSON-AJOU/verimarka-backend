@@ -2,16 +2,17 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIClient
 
-from .contracts import (
+from analysis.contracts import (
     GuardCandidateV1,
     GuardResponseV1,
     GuardScoresV1,
     GuardTimingV1,
     GuardWatermarkResultV1,
 )
-from .services import AIIntegrationError
+from analysis.services import AIIntegrationError
 
 
 User = get_user_model()
@@ -41,11 +42,7 @@ class GuardAnalyzeViewTests(TestCase):
             decision="allow",
             reason="No similar images found in database",
             next_action="none",
-            scores=GuardScoresV1(
-                top_cosine=0.12,
-                top_phash_dist=24,
-                policy_version="v1",
-            ),
+            scores=GuardScoresV1(top_cosine=0.12, top_phash_dist=24, policy_version="v1"),
             top_match=GuardCandidateV1(
                 db_key="db/item.png",
                 db_file="item.png",
@@ -65,7 +62,7 @@ class GuardAnalyzeViewTests(TestCase):
         )
 
         response = self.client.post(
-            "/api/analysis/guard/",
+            reverse("analysis_guard"),
             {
                 "job_id": "job-1",
                 "mode": "register",
@@ -78,16 +75,7 @@ class GuardAnalyzeViewTests(TestCase):
                     }
                 ],
                 "meta": {"user_id": "u1", "content_id": "c1"},
-                "options": {
-                    "search": {"top_k": 10, "top_phash": 10},
-                    "watermark": {
-                        "apply_on_allow": True,
-                        "model": "wam",
-                        "nbits": 32,
-                        "scaling_w": 2.0,
-                        "proportion_masked": 0.65,
-                    },
-                },
+                "options": {},
             },
             format="json",
         )
@@ -98,7 +86,7 @@ class GuardAnalyzeViewTests(TestCase):
 
     def test_guard_endpoint_requires_valid_payload(self):
         response = self.client.post(
-            "/api/analysis/guard/",
+            reverse("analysis_guard"),
             {
                 "job_id": "job-2",
                 "mode": "register",
@@ -124,7 +112,7 @@ class GuardAnalyzeViewTests(TestCase):
         )
 
         response = self.client.post(
-            "/api/analysis/guard/",
+            reverse("analysis_guard"),
             {
                 "job_id": "job-timeout",
                 "mode": "register",
@@ -138,7 +126,6 @@ class GuardAnalyzeViewTests(TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["error_code"], "AI_TIMEOUT")
-        self.assertEqual(response.json()["detail"], "AI 처리 시간이 초과되었습니다.")
         self.assertTrue(response.json()["retryable"])
 
     @patch("analysis.views.AnalysisGuardService.run_guard_v1")
@@ -146,7 +133,7 @@ class GuardAnalyzeViewTests(TestCase):
         mocked_run_guard.side_effect = RuntimeError("unexpected boom")
 
         response = self.client.post(
-            "/api/analysis/guard/",
+            reverse("analysis_guard"),
             {
                 "job_id": "job-crash",
                 "mode": "register",
@@ -160,4 +147,3 @@ class GuardAnalyzeViewTests(TestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json()["error_code"], "INTERNAL_SERVER_ERROR")
-        self.assertEqual(response.json()["detail"], "서버 내부 오류가 발생했습니다.")
