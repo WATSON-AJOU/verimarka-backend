@@ -10,7 +10,9 @@ from django.utils import timezone
 from analysis.contracts import GuardRequestV1
 from analysis.services import AnalysisGuardService
 
+from .document_service import ContentDocumentAIService
 from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
+from .input_safety import resolve_content_type_from_mime
 from .models import Content
 from .storage import S3StorageService
 
@@ -51,19 +53,39 @@ class ContentRegistrationService:
             temp_path.unlink(missing_ok=True)
 
     @classmethod
+    def register_document(cls, *, content: Content, user, source_input: dict[str, str]) -> Content:
+        request_dict = {
+            "job_id": str(content.public_id),
+            "input": {
+                "s3_key": source_input.get("s3_key"),
+                "filename": content.original_filename,
+                "mime_type": content.mime_type,
+            },
+            "meta": {
+                "user_id": str(user.id),
+                "content_id": str(content.public_id),
+            },
+            "document_type": getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+        }
+        result = ContentDocumentAIService.run_register_workflow_v1(request_dict)
+        return cls.apply_document_register_result(content=content, result=result)
+
+    @classmethod
     def create_pending_content(cls, *, user, upload, source_sha256: str = "") -> Content:
+        mime_type = getattr(upload, "content_type", "") or "application/octet-stream"
+        content_type = resolve_content_type_from_mime(mime_type)
         display_filename = normalize_uploaded_filename(
             getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
+            mime_type=mime_type or None,
         )
         content = Content.objects.create(
             owner=user,
-            content_type="image",
+            content_type=content_type,
             status="pending",
             original_file="",
             original_filename=display_filename,
             source_sha256=source_sha256,
-            mime_type=(getattr(upload, "content_type", "") or "application/octet-stream"),
+            mime_type=mime_type,
             file_size=upload.size,
         )
 
@@ -100,7 +122,7 @@ class ContentRegistrationService:
         content.status = "block"
         content.decision = "block"
         content.reason = (
-            f"동일한 원본 이미지가 이미 처리되었습니다. "
+            f"동일한 원본 파일이 이미 처리되었습니다. "
             f"(기존 콘텐츠 ID: {existing_content.public_id})"
         )
         content.next_action = "none"
@@ -137,6 +159,63 @@ class ContentRegistrationService:
             existing_content.public_id,
             content.owner_id,
             source_sha256,
+        )
+        return content
+
+    @classmethod
+    def apply_document_register_result(cls, *, content: Content, result: dict) -> Content:
+        watermark = result.get("watermark") or {}
+        assets = result.get("assets") or {}
+        ocr_summary = result.get("ocr_summary") or {}
+        raw_decision = result.get("decision") or "failed"
+
+        if raw_decision == "verified":
+            content.status = "allow"
+            content.decision = "allow"
+            content.reason = result.get("reason") or "문서 등록 처리가 완료되었습니다."
+            content.next_action = "none"
+        elif raw_decision == "review":
+            content.status = "review"
+            content.decision = "review"
+            content.reason = result.get("reason") or "문서 확인이 필요합니다."
+            content.next_action = "start_vote"
+        else:
+            content.status = "block"
+            content.decision = "block"
+            content.reason = result.get("reason") or "문서 등록 처리에 실패했습니다."
+            content.next_action = "none"
+
+        content.original_storage_key = assets.get("original_s3_key") or content.original_storage_key
+        content.watermark = {
+            "requested": True,
+            "applied": bool(watermark.get("applied")),
+            "payload_id": watermark.get("payload_id"),
+            "output_key": watermark.get("output_key") or assets.get("watermarked_s3_key"),
+            "output_path": watermark.get("output_path"),
+            "page_results": watermark.get("page_results") or [],
+            "document_decision": raw_decision,
+            "pending_actions": result.get("pending_actions") or [],
+        }
+        content.document_metadata = {
+            "document_type": result.get("document_type") or getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+            "ocr_summary": ocr_summary,
+            "ocr_raw_s3_key": assets.get("ocr_raw_s3_key"),
+            "watermarked_s3_key": assets.get("watermarked_s3_key"),
+            "warnings": result.get("warnings") or [],
+        }
+        content.analyzed_at = timezone.now()
+        content.save(
+            update_fields=[
+                "status",
+                "decision",
+                "reason",
+                "next_action",
+                "original_storage_key",
+                "watermark",
+                "document_metadata",
+                "analyzed_at",
+                "updated_at",
+            ]
         )
         return content
 
@@ -229,7 +308,11 @@ class ContentRegistrationService:
             owner_id=content.owner_id,
             content_public_id=str(content.public_id),
             filename=content.original_filename,
-            stage=settings.CONTENT_ORIGINAL_PREFIX,
+            stage=(
+                settings.S3_PREFIX_DOC_REGISTER_REQUEST
+                if content.content_type == "document"
+                else settings.CONTENT_ORIGINAL_PREFIX
+            ),
         )
         S3StorageService.upload_file(
             local_path=str(temp_path),

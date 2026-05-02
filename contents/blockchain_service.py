@@ -633,6 +633,9 @@ class ContentBlockchainService:
 
     @classmethod
     def _ensure_vector_upserted(cls, *, content: Content) -> Content:
+        if content.content_type != "image":
+            return content
+
         blockchain_data = content.blockchain or {}
         vector_upsert = blockchain_data.get("vector_upsert") or {}
         if vector_upsert.get("success"):
@@ -873,7 +876,7 @@ class ContentBlockchainService:
 
         raise AIIntegrationError(
             error_code="FILE_NOT_FOUND",
-            error_message="민팅에 사용할 이미지 파일을 찾을 수 없습니다.",
+            error_message="민팅에 사용할 파일을 찾을 수 없습니다.",
             retryable=False,
             status_code=500,
             job_id=str(content.public_id),
@@ -891,7 +894,7 @@ class ContentBlockchainService:
 
         raise AIIntegrationError(
             error_code="FILE_NOT_FOUND",
-            error_message="커뮤니티 검증 생성에 사용할 원본 이미지를 찾을 수 없습니다.",
+            error_message="커뮤니티 검증 생성에 사용할 원본 파일을 찾을 수 없습니다.",
             retryable=False,
             status_code=500,
             job_id=str(content.public_id),

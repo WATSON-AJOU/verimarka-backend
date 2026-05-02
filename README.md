@@ -11,6 +11,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+문서 등록/검증까지 함께 쓰려면 서버 런타임에 아래도 필요합니다.
+
+- Python 패키지: `pymupdf`, `requests`
+- OS 패키지: `libreoffice` (`DOCX` 지원 시)
+
 로컬 개발에서 포맷터와 pre-commit 훅까지 같이 쓰려면:
 
 ```bash
@@ -211,3 +216,4 @@ logs       : 판정 로그, 검증 이력, 분쟁 대응 로그
 - dev 환경에서도 현재 구조상 S3 업로드를 전제로 동작하는 기능이 있습니다.
 - `verify`, `register`, `watermark`는 큐 기반이라 Redis + Celery가 빠지면 정상 동작하지 않습니다.
 - 의존성 변경 후에는 필요 시 `pip freeze > requirements.txt`로 반영합니다.
+

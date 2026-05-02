@@ -19,6 +19,7 @@ from logs.models import VerificationHistoryLog
 from wallets.models import WalletLink
 from .blockchain_service import ContentBlockchainService
 from .models import Content
+from .services import ContentRegistrationService
 from .verification_service import ContentVerificationService
 from .watermark_service import ContentWatermarkService
 
@@ -93,11 +94,11 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(content.original_file.name, "")
         self.assertIsNotNone(content.analyzed_at)
 
-    def test_register_rejects_non_image_file(self):
+    def test_register_rejects_unsupported_file(self):
         upload = SimpleUploadedFile(
-            "sample.pdf",
-            b"%PDF-1.4",
-            content_type="application/pdf",
+            "sample.txt",
+            b"plain text",
+            content_type="text/plain",
         )
 
         response = self.client.post(
@@ -108,6 +109,31 @@ class ContentRegisterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Content.objects.count(), 0)
+
+    def test_register_accepts_document_file(self):
+        upload = SimpleUploadedFile(
+            "sample.pdf",
+            b"%PDF-1.4",
+            content_type="application/pdf",
+        )
+
+        with patch("contents.views.S3StorageService.is_enabled", return_value=True), \
+             patch("contents.services.S3StorageService.is_enabled", return_value=True), \
+             patch("contents.services.S3StorageService.upload_file"), \
+             patch("contents.services.S3StorageService.generate_presigned_get_url", return_value="https://example.com/file.pdf"), \
+             patch("contents.services.S3StorageService.build_s3_uri", return_value="s3://bucket/document/register_request/1/test/file.pdf"), \
+             patch("analysis.tasks.run_register_analysis_job.delay") as mocked_delay:
+            mocked_delay.return_value.id = "celery-task-doc-1"
+            response = self.client.post(
+                "/api/contents/register/",
+                {"file": upload},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        content = Content.objects.get()
+        self.assertEqual(content.content_type, "document")
+        self.assertEqual(content.mime_type, "application/pdf")
 
     def test_register_sanitizes_filename_before_persisting(self):
         upload = SimpleUploadedFile(
@@ -263,6 +289,135 @@ class ContentVerifyFilenameTests(TestCase):
         log = VerificationHistoryLog.objects.get()
         self.assertEqual((payload.get("uploaded") or {}).get("file_name"), "verify file!!.png")
         self.assertEqual(log.uploaded_file_name, "verify file!!.png")
+
+    @patch("contents.verification_service.ContentDocumentAIService.run_verify_workflow_v1")
+    @patch("contents.verification_service.S3StorageService.is_enabled", return_value=False)
+    def test_verify_document_returns_manual_review_payload(
+        self,
+        _mocked_storage,
+        mocked_verify,
+    ):
+        mocked_verify.return_value = {
+            "success": True,
+            "decision": "review",
+            "reason": "document watermark not detected; manual or token check required",
+            "document_type": "labor_contract_std_v1",
+            "assets": {"original_s3_key": "document/verify_request/test.pdf"},
+            "watermark": {
+                "detected": False,
+                "payload_id": None,
+                "best_page": {"page": 2, "confidence": 0.42},
+                "page_results": [],
+            },
+            "ocr_summary": None,
+            "pending_actions": ["manual_review"],
+        }
+
+        payload = ContentVerificationService.verify_from_source_input(
+            user=self.user,
+            upload_name="contract.pdf",
+            upload_size=1024,
+            upload_content_type="application/pdf",
+            content_type="document",
+            source_input={"s3_key": "document/verify_request/test.pdf"},
+        )
+
+        self.assertEqual(payload["outcome"], "candidate")
+        self.assertEqual(payload["detect"]["status_label"], "확인 필요")
+        self.assertEqual(payload["detect"]["best_page"], 2)
+        self.assertIn("수동", payload["candidate"]["summary"])
+
+
+class ContentDocumentRegistrationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="doccreator",
+            nickname="doccreator",
+            display_name="Doc Creator",
+            email="doccreator@example.com",
+            password="password1234",
+            phone="01099990000",
+            phone_verified=True,
+        )
+
+    def test_apply_document_register_result_persists_document_metadata(self):
+        content = Content.objects.create(
+            owner=self.user,
+            content_type="document",
+            status="pending",
+            original_file="",
+            original_filename="contract.pdf",
+            mime_type="application/pdf",
+            file_size=1024,
+        )
+
+        updated = ContentRegistrationService.apply_document_register_result(
+            content=content,
+            result={
+                "success": True,
+                "decision": "review",
+                "reason": "document watermarked; OCR summary unavailable or skipped",
+                "document_type": "labor_contract_std_v1",
+                "assets": {
+                    "original_s3_key": "document/register_request/contract.pdf",
+                    "watermarked_s3_key": "document/watermarked/contract_watermarked.pdf",
+                    "ocr_raw_s3_key": "document/ocr_raw/contract.json",
+                },
+                "watermark": {
+                    "applied": True,
+                    "payload_id": "4242",
+                    "output_key": "document/watermarked/contract_watermarked.pdf",
+                    "output_path": "/tmp/contract_watermarked.pdf",
+                    "page_results": [{"page": 1, "applied": True}],
+                },
+                "ocr_summary": {
+                    "representative_name": {"value": "대표자"},
+                    "worker_name": {"value": "근로자"},
+                    "written_date": {"value": "2026-05-02"},
+                },
+                "pending_actions": ["mint_token_with_existing_image_fields"],
+                "warnings": [],
+            },
+        )
+
+        self.assertEqual(updated.status, "review")
+        self.assertEqual(updated.decision, "review")
+        self.assertEqual(updated.content_type, "document")
+        self.assertEqual(updated.watermark["document_decision"], "review")
+        self.assertEqual(updated.document_metadata["document_type"], "labor_contract_std_v1")
+        self.assertEqual(
+            updated.document_metadata["ocr_summary"]["representative_name"]["value"],
+            "대표자",
+        )
+
+    def test_apply_document_register_result_maps_failed_to_block(self):
+        content = Content.objects.create(
+            owner=self.user,
+            content_type="document",
+            status="pending",
+            original_file="",
+            original_filename="contract.pdf",
+            mime_type="application/pdf",
+            file_size=1024,
+        )
+
+        updated = ContentRegistrationService.apply_document_register_result(
+            content=content,
+            result={
+                "success": False,
+                "decision": "failed",
+                "reason": "render failed",
+                "document_type": "labor_contract_std_v1",
+                "assets": {},
+                "watermark": {},
+                "ocr_summary": None,
+                "pending_actions": [],
+                "warnings": [],
+            },
+        )
+
+        self.assertEqual(updated.status, "block")
+        self.assertEqual(updated.decision, "block")
 
 
 class ContentBlockchainFilenameTests(TestCase):

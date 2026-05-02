@@ -11,7 +11,9 @@ from analysis.services import AIIntegrationError, AnalysisGuardService
 from analysis.watermark_services import WatermarkAIService
 
 from .blockchain_service import ContentBlockchainService
+from .document_service import ContentDocumentAIService
 from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
+from .input_safety import resolve_content_type_from_mime
 from .models import Content
 from .services import ContentRegistrationService
 from .storage import S3StorageService
@@ -34,6 +36,7 @@ class ContentVerificationService:
                 upload_name=upload_name,
                 upload_size=upload.size,
                 upload_content_type=getattr(upload, "content_type", "") or "application/octet-stream",
+                content_type=resolve_content_type_from_mime(getattr(upload, "content_type", "") or "application/octet-stream"),
                 source_input=source_input,
                 temp_path=temp_path,
             )
@@ -51,10 +54,19 @@ class ContentVerificationService:
         upload_name: str,
         upload_size: int,
         upload_content_type: str,
+        content_type: str,
         source_input: dict[str, str],
         temp_path: Path | None = None,
     ) -> dict:
         upload_name = normalize_uploaded_filename(upload_name, mime_type=upload_content_type)
+        if content_type == "document":
+            return cls._verify_document_from_source_input(
+                user=user,
+                upload_name=upload_name,
+                upload_size=upload_size,
+                upload_content_type=upload_content_type,
+                source_input=source_input,
+            )
         verify_job_id = f"verify-{timezone.now().timestamp()}"
         logger.info(
             "contents.verify.detect_request user_id=%s job_id=%s source_input=%s",
@@ -130,6 +142,90 @@ class ContentVerificationService:
             upload_content_type=upload_content_type,
             source_input=source_input,
         )
+
+    @classmethod
+    def _verify_document_from_source_input(
+        cls,
+        *,
+        user,
+        upload_name: str,
+        upload_size: int,
+        upload_content_type: str,
+        source_input: dict[str, str],
+    ) -> dict:
+        verify_job_id = f"verify-{timezone.now().timestamp()}"
+        result = ContentDocumentAIService.run_verify_workflow_v1(
+            {
+                "job_id": verify_job_id,
+                "input": {
+                    "s3_key": source_input.get("s3_key"),
+                    "filename": upload_name,
+                    "mime_type": upload_content_type,
+                },
+                "meta": {
+                    "user_id": str(getattr(user, "id", "")),
+                },
+                "document_type": getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+            }
+        )
+
+        watermark = result.get("watermark") or {}
+        detected = bool(watermark.get("detected"))
+        payload_id = watermark.get("payload_id")
+        if detected and payload_id:
+            verified_payload = cls._build_verified_result(
+                user=user,
+                upload_name=upload_name,
+                upload_size=upload_size,
+                temp_path=None,
+                detect_result={
+                    "detected": True,
+                    "payload_id": payload_id,
+                    "confidence": (watermark.get("best_page") or {}).get("confidence"),
+                    "bit_accuracy": None,
+                    "model": "wam",
+                    "model_version": None,
+                },
+            )
+            if verified_payload:
+                verified_payload["uploaded"]["preview_url"] = None
+                verified_payload["detect"] = {
+                    **verified_payload.get("detect", {}),
+                    "best_page": (watermark.get("best_page") or {}).get("page"),
+                }
+                return verified_payload
+
+        best_page = watermark.get("best_page") or {}
+        summary = "문서 워터마크를 찾지 못했습니다. 수동 검토가 필요합니다."
+        if result.get("reason"):
+            summary = result["reason"]
+        return {
+            "outcome": "candidate",
+            "headline_badge": "REVIEW",
+            "headline_title": "문서 워터마크를 확인하지 못했습니다.",
+            "headline_subtitle": "수동 확인이 필요한 문서입니다.",
+            "uploaded": {
+                "file_name": upload_name,
+                "file_size": upload_size,
+                "preview_url": None,
+                "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
+                "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
+            },
+            "detect": {
+                "detected": False,
+                "status_label": "확인 필요",
+                "confidence": best_page.get("confidence"),
+                "payload_id": payload_id,
+                "best_page": best_page.get("page"),
+            },
+            "candidate": {
+                "preview_url": None,
+                "file_name": None,
+                "owner_name": "-",
+                "registered_at": "-",
+                "summary": summary,
+            },
+        }
 
     @classmethod
     def _build_verified_result(cls, *, user, upload_name: str, upload_size: int, temp_path: Path | None, detect_result: dict) -> dict | None:
@@ -337,7 +433,11 @@ class ContentVerificationService:
             owner_id=0,
             content_public_id=f"verify-{zlib.crc32(safe_name.encode('utf-8')) & 0xFFFFFFFF}",
             filename=safe_name,
-            stage="verify",
+            stage=(
+                settings.S3_PREFIX_DOC_VERIFY_REQUEST
+                if resolve_content_type_from_mime(getattr(upload, "content_type", "") or "application/octet-stream") == "document"
+                else "verify"
+            ),
         )
         S3StorageService.upload_file(
             local_path=str(temp_path),

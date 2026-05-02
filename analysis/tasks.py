@@ -58,11 +58,18 @@ def run_register_analysis_job(self, job_public_id: str) -> dict:
     _mark_job_running(job, self.request.id)
 
     try:
-        content = ContentRegistrationService.run_guard_for_content(
-            content=job.content,
-            user_id=job.owner_id,
-            source_input=job.request_payload["source_input"],
-        )
+        if job.request_payload.get("content_type") == "document":
+            content = ContentRegistrationService.register_document(
+                content=job.content,
+                user=job.owner,
+                source_input=job.request_payload["source_input"],
+            )
+        else:
+            content = ContentRegistrationService.run_guard_for_content(
+                content=job.content,
+                user_id=job.owner_id,
+                source_input=job.request_payload["source_input"],
+            )
         payload = {"content_public_id": str(content.public_id)}
         _mark_job_success(job, payload)
         return payload
@@ -88,6 +95,7 @@ def run_verify_job(self, job_public_id: str) -> dict:
             upload_name=job.request_payload["upload_name"],
             upload_size=job.request_payload["upload_size"],
             upload_content_type=job.request_payload["upload_content_type"],
+            content_type=job.request_payload.get("content_type", "image"),
             source_input=job.request_payload["source_input"],
         )
         uploaded = payload.get("uploaded") or {}
@@ -103,7 +111,7 @@ def run_verify_job(self, job_public_id: str) -> dict:
             summary=(
                 f"워터마크 검증 성공 · Token #{((payload.get('blockchain') or {}).get('token_id') or '-')}"
                 if payload.get("outcome") == "verified"
-                else "검증 실패 · 유사 후보 탐색 완료"
+                else ((payload.get("candidate") or {}).get("summary") or "검증 실패 · 추가 확인 필요")
             ),
         )
         _mark_job_success(job, payload)

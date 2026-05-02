@@ -20,6 +20,7 @@ from accounts.permissions import IsPhoneVerified, IsWalletLinked
 
 from .serializers import ContentRegisterSerializer, ContentSerializer, ContentVerifySerializer
 from .serializers import ReviewVoteSignatureSerializer, ReviewVoteStartSerializer
+from .input_safety import resolve_content_type_from_mime
 from .services import ContentRegistrationService
 from .models import Content, VoteParticipationLog
 from .blockchain_service import ContentBlockchainService
@@ -41,16 +42,18 @@ def _build_async_job_response(job: AIJob, content: Content, request, *, status_c
     )
 
 
-def _build_watermarked_download_name(filename: str) -> str:
+def _build_watermarked_download_name(filename: str, *, content_type: str = "image") -> str:
     trimmed = (filename or "").strip()
     if not trimmed:
-        return "watermarked_VM"
+        return "watermarked_VM.pdf" if content_type == "document" else "watermarked_VM"
 
     dot_index = trimmed.rfind(".")
     if dot_index <= 0 or dot_index == len(trimmed) - 1:
-        return f"{trimmed}_VM"
+        suffix = ".pdf" if content_type == "document" else ""
+        return f"{trimmed}_VM{suffix}"
 
-    return f"{trimmed[:dot_index]}_VM{trimmed[dot_index:]}"
+    extension = ".pdf" if content_type == "document" else trimmed[dot_index:]
+    return f"{trimmed[:dot_index]}_VM{extension}"
 
 
 def _build_content_preview_url(request, content: Content) -> str | None:
@@ -142,6 +145,8 @@ class ContentRegisterView(APIView):
         )
 
         temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
+        upload_content_type = getattr(upload, "content_type", "") or "application/octet-stream"
+        resolved_content_type = resolve_content_type_from_mime(upload_content_type)
         try:
             matching_contents = list(
                 Content.objects.filter(owner=request.user, source_sha256=source_sha256)
@@ -221,7 +226,10 @@ class ContentRegisterView(APIView):
             owner=request.user,
             content=content,
             job_type="register",
-            request_payload={"source_input": source_input},
+            request_payload={
+                "source_input": source_input,
+                "content_type": resolved_content_type,
+            },
         )
         task = run_register_analysis_job.delay(str(job.public_id))
         job.celery_task_id = task.id
@@ -263,6 +271,8 @@ class ContentVerifyView(APIView):
             getattr(upload, "content_type", None),
         )
 
+        upload_content_type = getattr(upload, "content_type", "") or "application/octet-stream"
+        resolved_content_type = resolve_content_type_from_mime(upload_content_type)
         temp_path = ContentVerificationService._write_temp_file(upload)
         try:
             source_input = ContentVerificationService._build_source_input(temp_path=temp_path, upload=upload)
@@ -276,7 +286,8 @@ class ContentVerifyView(APIView):
                 "source_input": source_input,
                 "upload_name": upload.name,
                 "upload_size": upload.size,
-                "upload_content_type": getattr(upload, "content_type", "") or "application/octet-stream",
+                "upload_content_type": upload_content_type,
+                "content_type": resolved_content_type,
             },
         )
         task = run_verify_job.delay(str(job.public_id))
@@ -359,8 +370,8 @@ class ContentWatermarkDownloadView(APIView):
     def get(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
         watermark = content.watermark or {}
-        filename = _build_watermarked_download_name(content.original_filename)
-        content_type = content.mime_type or "application/octet-stream"
+        filename = _build_watermarked_download_name(content.original_filename, content_type=content.content_type)
+        content_type = "application/pdf" if content.content_type == "document" else (content.mime_type or "application/octet-stream")
 
         output_key = watermark.get("output_key")
         if output_key and S3StorageService.is_enabled():

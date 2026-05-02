@@ -3,7 +3,7 @@ from pathlib import Path
 from rest_framework import serializers
 
 from .models import Content
-from .input_safety import validate_uploaded_image_file
+from .input_safety import validate_uploaded_content_file
 from .storage import S3StorageService
 
 
@@ -34,6 +34,7 @@ class ContentSerializer(serializers.ModelSerializer):
             "top_match",
             "candidates",
             "watermark",
+            "document_metadata",
             "blockchain",
             "timing_ms",
             "created_at",
@@ -90,14 +91,14 @@ class ContentRegisterSerializer(serializers.Serializer):
     file = serializers.FileField()
 
     def validate_file(self, value):
-        return validate_uploaded_image_file(value)
+        return validate_uploaded_content_file(value)
 
 
 class ContentVerifySerializer(serializers.Serializer):
     file = serializers.FileField()
 
     def validate_file(self, value):
-        return validate_uploaded_image_file(value)
+        return validate_uploaded_content_file(value)
 
 
 class ReviewVoteSignatureSerializer(serializers.Serializer):

@@ -11,6 +11,7 @@ def content_upload_to(instance, filename):
 class Content(models.Model):
     CONTENT_TYPE_CHOICES = [
         ("image", "Image"),
+        ("document", "Document"),
     ]
 
     STATUS_CHOICES = [
@@ -46,6 +47,7 @@ class Content(models.Model):
     top_match = models.JSONField(default=dict, blank=True)
     candidates = models.JSONField(default=list, blank=True)
     watermark = models.JSONField(default=dict, blank=True)
+    document_metadata = models.JSONField(default=dict, blank=True)
     blockchain = models.JSONField(default=dict, blank=True)
     timing_ms = models.JSONField(default=dict, blank=True)
 
