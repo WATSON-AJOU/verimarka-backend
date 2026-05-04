@@ -10,14 +10,93 @@ concurrency:
   group: deploy-backend
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure backend EC2 instance is running
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AWS_REGION}" ]; then
+            echo "AWS_REGION secret is required to start the backend EC2 instance." >&2
+            exit 1
+          fi
+
+          if [ -z "${EC2_INSTANCE_ID}" ]; then
+            echo "EC2_INSTANCE_ID secret is required to start the EC2 instance." >&2
+            exit 1
+          fi
+
+          state="$(aws ec2 describe-instances \
+            --instance-ids "${EC2_INSTANCE_ID}" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)"
+
+          case "${state}" in
+            running)
+              echo "Backend EC2 instance is already running."
+              ;;
+            stopped)
+              echo "Starting EC2 instance ${EC2_INSTANCE_ID}."
+              aws ec2 start-instances --instance-ids "${EC2_INSTANCE_ID}" >/dev/null
+              ;;
+            stopping)
+              echo "Backend EC2 instance is stopping. Waiting before start."
+              aws ec2 wait instance-stopped --instance-ids "${EC2_INSTANCE_ID}"
+              aws ec2 start-instances --instance-ids "${EC2_INSTANCE_ID}" >/dev/null
+              ;;
+            pending)
+              echo "Backend EC2 instance is already starting."
+              ;;
+            *)
+              echo "Backend EC2 instance is in unsupported state: ${state}" >&2
+              exit 1
+              ;;
+          esac
+
+          aws ec2 wait instance-running --instance-ids "${EC2_INSTANCE_ID}"
+          aws ec2 wait instance-status-ok --instance-ids "${EC2_INSTANCE_ID}"
+
+          if [ -z "${DEPLOY_HOST}" ]; then
+            resolved_host="$(aws ec2 describe-instances \
+              --instance-ids "${EC2_INSTANCE_ID}" \
+              --query 'Reservations[0].Instances[0].PublicDnsName' \
+              --output text)"
+
+            if [ -z "${resolved_host}" ] || [ "${resolved_host}" = "None" ]; then
+              resolved_host="$(aws ec2 describe-instances \
+                --instance-ids "${EC2_INSTANCE_ID}" \
+                --query 'Reservations[0].Instances[0].PublicIpAddress' \
+                --output text)"
+            fi
+
+            if [ -z "${resolved_host}" ] || [ "${resolved_host}" = "None" ]; then
+              echo "Could not resolve a public host for backend EC2 instance." >&2
+              exit 1
+            fi
+
+            echo "DEPLOY_HOST=${resolved_host}" >> "${GITHUB_ENV}"
+          fi
 
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -27,11 +106,12 @@ jobs:
       - name: Add deploy host to known_hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.BACKEND_DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts
+        env:
+          DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT }}
 
       - name: Deploy backend with docker compose
         env:
-          DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.BACKEND_DEPLOY_USER }}
           DEPLOY_PATH: ${{ secrets.BACKEND_DEPLOY_PATH }}
