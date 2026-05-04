@@ -37,3 +37,9 @@ DATABASES = {
         },
     }
 }
+
+USE_FAKE_REDIS = env.bool("USE_FAKE_REDIS", default=False)
+
+if env.bool("USE_FAKE_CELERY", default=False):
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache+memory://"

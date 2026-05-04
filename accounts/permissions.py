@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework.permissions import BasePermission
 
 
@@ -15,6 +16,9 @@ class IsWalletLinked(BasePermission):
     message = "지갑 연결이 필요합니다."
 
     def has_permission(self, request, view):
+        if getattr(settings, "BYPASS_WALLET_LINK_PERMISSION", False):
+            return True
+
         if not request.user or not request.user.is_authenticated:
             return False
 

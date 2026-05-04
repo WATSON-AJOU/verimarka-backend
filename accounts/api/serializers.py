@@ -109,6 +109,39 @@ class AdminUserUpdateSerializer(serializers.Serializer):
         return instance
 
 
+class _AdminPayloadSerializer(serializers.Serializer):
+    def to_representation(self, instance):
+        return dict(instance)
+
+
+class AdminDashboardSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminUserListSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminUserDetailSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminImageListSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminImageDetailSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminVoteListSerializer(_AdminPayloadSerializer):
+    pass
+
+
+class AdminVoteDetailSerializer(_AdminPayloadSerializer):
+    pass
+
+
 class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -261,6 +294,15 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("정지된 계정입니다.")
         attrs["user"] = user
         attrs["email"] = email
+        return attrs
+
+
+class AdminLoginSerializer(LoginSerializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        user = attrs["user"]
+        if not (user.is_staff or user.is_superuser):
+            raise serializers.ValidationError("관리자 계정만 로그인할 수 있습니다.")
         return attrs
 
 

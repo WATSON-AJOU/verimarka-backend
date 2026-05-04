@@ -101,7 +101,7 @@ class ContentRegisterView(APIView):
                     )
                     return _build_async_job_response(existing_job, existing_content, request)
 
-                blocked_duplicate_source = next(
+                blocked_duplicate_source = existing_content if existing_job is not None and existing_job.status == "success" else next(
                     (
                         item
                         for item in matching_contents

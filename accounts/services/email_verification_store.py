@@ -5,6 +5,8 @@ import redis
 from django.conf import settings
 from django.utils import timezone
 
+from accounts.services.fake_redis import FakeRedis
+
 
 EMAIL_VERIFY_TTL_SECONDS = 180
 EMAIL_VERIFY_DAILY_LIMIT = 3
@@ -15,9 +17,14 @@ class EmailVerificationStoreError(Exception):
 
 
 def _redis_client() -> redis.Redis:
+    if getattr(settings, "USE_FAKE_REDIS", False):
+        return FakeRedis()
+
     redis_url = settings.REDIS_URL
     if not redis_url:
         raise EmailVerificationStoreError("REDIS_URL이 설정되지 않았습니다.")
+    if redis_url == "fakeredis://":
+        return FakeRedis()
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 

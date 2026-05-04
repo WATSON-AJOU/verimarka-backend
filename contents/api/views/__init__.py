@@ -11,4 +11,4 @@ from .content import (
     ContentWatermarkView,
     OngoingReviewVoteListView,
 )
-
+from contents.storage import S3StorageService as S3StorageService

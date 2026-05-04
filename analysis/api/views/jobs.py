@@ -1,15 +1,29 @@
 from django.shortcuts import get_object_or_404
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from analysis.api.services import AIIntegrationError, AnalysisGuardService
 from analysis.models import AIJob
-from analysis.api.services import AnalysisGuardService
 from contents.api.serializers import ContentSerializer
 
 
 class GuardAnalyzeView(APIView):
     def post(self, request):
-        response = AnalysisGuardService.run_guard_v1(request.data)
+        try:
+            response = AnalysisGuardService.run_guard_v1(request.data)
+        except AIIntegrationError as exc:
+            return Response(exc.to_response().model_dump(), status=exc.status_code)
+        except Exception:
+            return Response(
+                {
+                    "job_id": request.data.get("job_id"),
+                    "error_code": "INTERNAL_SERVER_ERROR",
+                    "error_message": "서버 내부 오류가 발생했습니다.",
+                    "retryable": True,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(response.model_dump(), status=200)
 
 

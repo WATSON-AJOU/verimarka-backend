@@ -95,7 +95,7 @@ class AnalysisHistoryView(APIView):
                 "blockchain": blockchain,
                 "sort_key": content.created_at,
             }]
-        elif has_review_vote and vote_status == "Approved":
+        if has_review_vote and vote_status == "Approved":
             end_time = vote.get("end_time_display") or vote.get("end_time") or "-"
             comparison_preview_url, comparison_file_name, comparison_public_id, _ = resolve_history_candidate(content, request)
             comparison_label = "유사 후보"
@@ -118,7 +118,7 @@ class AnalysisHistoryView(APIView):
                 "blockchain": blockchain,
                 "sort_key": content.created_at,
             }
-        elif content.decision == "allow":
+        if content.decision == "allow":
             summary = f"워터마크 & 토큰 발급 완료 (토큰 #{token_id})" if minted and token_id else "워터마크 삽입 완료" if watermark_applied else "등록 승인 완료"
             extra = f"{blockchain.get('network_name', 'Sepolia')} · Token #{token_id}" if minted and token_id else "토큰 발행 대기" if watermark_applied else "등록 승인됨"
             comparison_preview_url = watermark_preview_url
