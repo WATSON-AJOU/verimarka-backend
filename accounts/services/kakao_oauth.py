@@ -18,11 +18,14 @@ def exchange_code_for_token(code: str, redirect_uri: str) -> dict:
     if getattr(settings, "KAKAO_CLIENT_SECRET", ""):
         data["client_secret"] = settings.KAKAO_CLIENT_SECRET
 
-    resp = requests.post(
-        "https://kauth.kakao.com/oauth/token",
-        data=data,
-        timeout=10,
-    )
+    try:
+        resp = requests.post(
+            "https://kauth.kakao.com/oauth/token",
+            data=data,
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise KakaoOAuthError(f"token_exchange_failed: request_error {exc}") from exc
     if resp.status_code != 200:
         raise KakaoOAuthError(f"token_exchange_failed: {resp.status_code} {resp.text}")
 
@@ -30,11 +33,14 @@ def exchange_code_for_token(code: str, redirect_uri: str) -> dict:
 
 
 def fetch_userinfo(access_token: str) -> dict:
-    resp = requests.get(
-        "https://kapi.kakao.com/v2/user/me",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=10,
-    )
+    try:
+        resp = requests.get(
+            "https://kapi.kakao.com/v2/user/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise KakaoOAuthError(f"userinfo_failed: request_error {exc}") from exc
     if resp.status_code != 200:
         raise KakaoOAuthError(f"userinfo_failed: {resp.status_code} {resp.text}")
 
