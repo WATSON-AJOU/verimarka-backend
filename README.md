@@ -69,9 +69,15 @@ USE_FAKE_REDIS=1 USE_FAKE_CELERY=1 DJANGO_SETTINGS_MODULE=config.settings.dev .v
 
 이 방식은 로컬 서버 기동과 일반 API 확인용입니다. 실제 비동기 분석, 검증, 워터마크 작업까지 확인하려면 아래처럼 Docker Compose의 Redis와 Celery 워커를 함께 실행해야 합니다.
 
+서버 상태만 확인:
+
+```bash
+USE_FAKE_REDIS=1 USE_FAKE_CELERY=1 DJANGO_SETTINGS_MODULE=config.settings.dev .venv/bin/python manage.py check
+```
+
 ## 한 번에 필요한 로컬 프로세스
 
-최소 실행 조합:
+실제 비동기 기능까지 확인하는 실행 조합:
 
 1. `docker compose up -d`
 2. `DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver`
@@ -84,12 +90,14 @@ Celery 워커가 없으면 아래 기능은 응답이 `queued`에서 멈춥니�
 - 워터마크 삽입
 
 ## 프론트엔드와 함께 실행
+백엔드를 먼저 실행한 뒤 프론트 개발 서버를 각각 별도 터미널에서 실행합니다.
+
 사용자 프론트:
 
 ```bash
 cd /Users/emfpdlzj/Desktop/verimarka/verimarka-FRONTEND/verimarka-frontend
 npm install
-npm run dev -- --host 127.0.0.1 --port 5173
+npm run dev
 ```
 
 관리자 프론트:
@@ -97,14 +105,24 @@ npm run dev -- --host 127.0.0.1 --port 5173
 ```bash
 cd /Users/emfpdlzj/Desktop/verimarka/verimarka-admin-frontend
 npm install
-npm run dev -- --host 127.0.0.1 --port 5174
+npm run dev
 ```
 
 접속 주소:
 
 - 백엔드: `http://127.0.0.1:8000/`
 - 사용자 프론트: `http://127.0.0.1:5173/`
-- 관리자 프론트: `http://127.0.0.1:5174/`
+- 관리자 프론트: `http://127.0.0.1:4173/`
+
+포트를 명시해서 실행해야 할 때는 아래처럼 실행합니다.
+
+```bash
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-FRONTEND/verimarka-frontend
+npm run dev -- --host 127.0.0.1 --port 5173
+
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-admin-frontend
+npm run dev -- --host 127.0.0.1 --port 4173
+```
 
 ## 자주 쓰는 확인 명령
 
