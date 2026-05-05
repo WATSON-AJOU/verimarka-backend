@@ -6,6 +6,7 @@
 
 ### 1. 가상환경 / 의존성
 ```bash
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-BACKEND
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -58,6 +59,16 @@ DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config worker -l info -Q ai
 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py createsuperuser
 ```
 
+## Redis/Celery 없이 로컬 서버만 확인
+Redis와 Celery 워커를 띄우지 않고 API 서버 구동 여부만 확인하려면 fake 모드를 사용할 수 있습니다.
+
+```bash
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-BACKEND
+USE_FAKE_REDIS=1 USE_FAKE_CELERY=1 DJANGO_SETTINGS_MODULE=config.settings.dev .venv/bin/python manage.py runserver 127.0.0.1:8000
+```
+
+이 방식은 로컬 서버 기동과 일반 API 확인용입니다. 실제 비동기 분석, 검증, 워터마크 작업까지 확인하려면 아래처럼 Docker Compose의 Redis와 Celery 워커를 함께 실행해야 합니다.
+
 ## 한 번에 필요한 로컬 프로세스
 
 최소 실행 조합:
@@ -71,6 +82,29 @@ Celery 워커가 없으면 아래 기능은 응답이 `queued`에서 멈춥니�
 - 저작물 등록 분석
 - 저작물 검증
 - 워터마크 삽입
+
+## 프론트엔드와 함께 실행
+사용자 프론트:
+
+```bash
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-FRONTEND/verimarka-frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+관리자 프론트:
+
+```bash
+cd /Users/emfpdlzj/Desktop/verimarka/verimarka-admin-frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5174
+```
+
+접속 주소:
+
+- 백엔드: `http://127.0.0.1:8000/`
+- 사용자 프론트: `http://127.0.0.1:5173/`
+- 관리자 프론트: `http://127.0.0.1:5174/`
 
 ## 자주 쓰는 확인 명령
 
@@ -216,4 +250,3 @@ logs       : 판정 로그, 검증 이력, 분쟁 대응 로그
 - dev 환경에서도 현재 구조상 S3 업로드를 전제로 동작하는 기능이 있습니다.
 - `verify`, `register`, `watermark`는 큐 기반이라 Redis + Celery가 빠지면 정상 동작하지 않습니다.
 - 의존성 변경 후에는 필요 시 `pip freeze > requirements.txt`로 반영합니다.
-
