@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import environ
+from corsheaders.defaults import default_headers
 
 from config.logging import build_logging_config
 from config.sentry import init_sentry
@@ -108,7 +110,9 @@ AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "NAME": (
+            "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+        ),
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
@@ -136,11 +140,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "EXCEPTION_HANDLER": "config.exceptions.verimarka_exception_handler",
 }
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-request-id",
+]
 
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
 GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
@@ -194,11 +200,15 @@ BLOCKCHAIN_INTEGRATION_ROOT = env(
     "BLOCKCHAIN_INTEGRATION_ROOT",
     default=str(BASE_DIR.parent / "Blockchain" / "backend_integration"),
 )
-VERIMARKA_PUBLIC_BASE_URL = env("VERIMARKA_PUBLIC_BASE_URL", default="https://verimarka.com")
+VERIMARKA_PUBLIC_BASE_URL = env(
+    "VERIMARKA_PUBLIC_BASE_URL", default="https://verimarka.com"
+)
 WATSON_RECIPIENT_ADDRESS = env("WATSON_RECIPIENT_ADDRESS", default="")
 BLOCKCHAIN_EVENT_SYNC_SECRET = env("BLOCKCHAIN_EVENT_SYNC_SECRET", default="")
 SENTRY_DSN = env("SENTRY_DSN", default="")
-SENTRY_ENVIRONMENT = env("SENTRY_ENVIRONMENT", default="development" if DEBUG else "production")
+SENTRY_ENVIRONMENT = env(
+    "SENTRY_ENVIRONMENT", default="development" if DEBUG else "production"
+)
 SENTRY_RELEASE = env("SENTRY_RELEASE", default="")
 SENTRY_TRACES_SAMPLE_RATE = env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0)
 
@@ -222,9 +232,15 @@ DOC_MAX_PAGES = env.int("DOC_MAX_PAGES", default=5)
 DOC_OCR_TIMEOUT_SEC = env.int("DOC_OCR_TIMEOUT_SEC", default=30)
 CLOVA_OCR_INVOKE_URL = env("CLOVA_OCR_INVOKE_URL", default="")
 CLOVA_OCR_SECRET = env("CLOVA_OCR_SECRET", default="")
-S3_PREFIX_DOC_REGISTER_REQUEST = env("S3_PREFIX_DOC_REGISTER_REQUEST", default="document/register_request")
-S3_PREFIX_DOC_VERIFY_REQUEST = env("S3_PREFIX_DOC_VERIFY_REQUEST", default="document/verify_request")
-S3_PREFIX_DOC_WATERMARK_RESULT = env("S3_PREFIX_DOC_WATERMARK_RESULT", default="document/watermarked")
+S3_PREFIX_DOC_REGISTER_REQUEST = env(
+    "S3_PREFIX_DOC_REGISTER_REQUEST", default="document/register_request"
+)
+S3_PREFIX_DOC_VERIFY_REQUEST = env(
+    "S3_PREFIX_DOC_VERIFY_REQUEST", default="document/verify_request"
+)
+S3_PREFIX_DOC_WATERMARK_RESULT = env(
+    "S3_PREFIX_DOC_WATERMARK_RESULT", default="document/watermarked"
+)
 S3_PREFIX_DOC_PREVIEW = env("S3_PREFIX_DOC_PREVIEW", default="document/preview")
 S3_PREFIX_DOC_OCR_RAW = env("S3_PREFIX_DOC_OCR_RAW", default="document/ocr_raw")
 S3_PREFIX_DOC_REJECTED = env("S3_PREFIX_DOC_REJECTED", default="document/rejected")
