@@ -1,270 +1,90 @@
-# WATSON-BACKEND
+# Verimarka Backend
 
-로컬 기본 주소: `http://127.0.0.1:8000/`
+AI 저작물의 등록 가능성 판정, 워터마크 삽입, NFT 발급, 투표 검증 흐름을 제공하는 Django 기반 백엔드입니다.
 
-## 로컬 실행 순서
+기존 개발/운영 인수인계 문서는 [HANDOFF.md](./HANDOFF.md)에 보존했습니다.
 
-### 1. 가상환경 / 의존성
-```bash
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-BACKEND
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+## 1. 프로젝트 한 줄 소개
+
+Verimarka는 AI 생성 이미지의 저작권 등록 가능성을 분석하고, 워터마크와 NFT 발급을 통해 저작물의 소유 및 검증 기록을 남기는 서비스입니다.
+
+
+## 2. 개발 배경
+
+AI 생성물이 빠르게 늘어나면서 원본성, 소유권, 등록 가능성, 검증 이력을 서비스 안에서 함께 다룰 필요가 생겼습니다. Verimarka는 AI 분석 결과를 기준으로 등록 가능 여부를 `ALLOW`, `REVIEW`, `BLOCK`으로 나누고, 필요한 경우 사용자 투표와 블록체인 기록을 연결해 저작물 등록 이후의 신뢰 흐름까지 관리하도록 설계했습니다.
+
+## 3. 주요 기능
+
+- 이메일, Google, Kakao 기반 회원가입/로그인
+- JWT 인증, 토큰 갱신, 내 정보 조회/수정, 회원 탈퇴
+- 이메일 인증, SMS 본인인증, 미인증 사용자 접근 제한
+- AI 저작물 이미지 업로드 및 등록 가능 여부 판정
+- `ALLOW`, `REVIEW`, `BLOCK` 상태별 후속 처리
+- 워터마크 삽입, 워터마크 이미지 다운로드, 추후 NFT 발급
+- REVIEW 상태 투표 생성, 참여, 72시간 이후 종료 처리
+- 투표 결과 기반 워터마크/NFT 발급 권한 제어
+- 지갑 등록 및 NFT 발급 기록 관리
+- Celery/Redis 기반 AI 작업 비동기 처리
+- request id 기반 로깅, Sentry, Slack 알림, health API
+- GitHub Actions, Docker, Nginx 기반 배포 자동화
+
+## 전체구조
+![](./image/backend.png)
+
+![](./image/system-architect.png)
+
+## 4. 기술 스택
+
+- Backend: Django, Django REST Framework, Simple JWT
+- Database/Queue: PostgreSQL, Redis, Celery
+- Blockchain: Web3.py, Ethereum Sepolia 테스트넷
+- Auth/External: Google OAuth, Kakao OAuth, SMS 인증, 이메일 인증
+- Infra: Docker Compose, Nginx, Let's Encrypt, AWS EC2, AWS RDS
+- Observability: Django logging, Sentry, Slack 알림, request id 추적
+- Quality: Ruff, pre-commit, GitHub Actions
+
+## 5. 시스템 아키텍처 그림
+
+```mermaid
+flowchart LR
+    U["User Frontend"] --> N["Nginx / HTTPS"]
+    A["Admin Frontend"] --> N
+    N --> API["Django REST API"]
+    API --> DB[("PostgreSQL / RDS")]
+    API --> R[("Redis")]
+    API --> S3["Image / Upload Storage"]
+    API --> OAUTH["Google / Kakao OAuth"]
+    API --> SMS["SMS Provider"]
+    API --> W["Wallet / Web3"]
+    API --> Q["Celery Queue"]
+    Q --> C["Celery Workers"]
+    C --> AI["AI Similarity / Watermark Pipeline"]
+    C --> BC["NFT Minting / Sepolia"]
+    API --> OBS["Sentry / Slack / Logs"]
 ```
 
-문서 등록/검증까지 함께 쓰려면 서버 런타임에 아래도 필요합니다.
+## 6. 역할 분담
+- 박준서: AI 담당
+- 박민정: 웹 풀스택 담당
+- 임윤수: 블록체인 담당
 
-- Python 패키지: `pymupdf`, `requests`
-- OS 패키지: `libreoffice` (`DOCX` 지원 시)
+## 7. 기술적으로 고민한 점
 
-로컬 개발에서 포맷터와 pre-commit 훅까지 같이 쓰려면:
+- AI 판정 결과를 단순 성공/실패가 아니라 `ALLOW`, `REVIEW`, `BLOCK` 상태로 분리해 사용자 경험과 권한 처리를 명확히 했습니다.
+- 시간이 오래 걸리는 AI 분석, 검증, 워터마크 삽입 작업은 Celery/Redis 큐로 분리해 API 응답 지연과 서버 부하를 줄였습니다.
+- 지갑이 없는 사용자도 이미지 워터마크 삽입까지는 가능하게 하고, NFT 발급은 지갑 연결 이후 이어서 진행할 수 있도록 흐름을 나눴습니다.
+- 운영 로그에는 request id를 포함해 사용자 프론트, 관리자 프론트, 백엔드 오류를 한 흐름으로 추적할 수 있게 했습니다.
+- 배포 실패 시 헬스체크와 롤백 전략을 함께 검토해 운영 장애 대응 가능성을 높였습니다.
 
-```bash
-pip install -r requirements-dev.txt
-pre-commit install
-```
+## 8. 트러블슈팅 / 성과
 
-### 2. 로컬 DB / Redis 실행
-현재 `docker-compose.yml`에는 `db`, `redis`만 있습니다.
+- OAuth code를 백엔드에서 토큰으로 교환하도록 구현해 클라이언트에 민감한 인증 흐름이 과도하게 노출되지 않도록 정리했습니다.
+- 이메일 인증에는 Redis TTL을 적용하고, SMS 인증에는 일 요청 횟수와 인증 제한 시간을 둬 인증 남용 가능성을 줄였습니다.
+- 투표 종료 시점을 사용자의 최초 상세 조회와 연결해 별도 스케줄러 없이 72시간 만료 처리를 안정적으로 수행하도록 구성했습니다.
+- 워터마크 삽입 후 즉시 NFT를 발급하지 않아도 나중에 이어서 발급할 수 있도록 기록 상태를 분리했습니다.
+- Sentry와 Slack 알림, 프론트/백엔드 오류 로그를 연결해 운영 중 문제 파악 시간을 줄일 수 있는 기반을 만들었습니다.
 
-```bash
-docker compose up -d
-docker compose ps
-```
+## 9. 실행 방법
 
-- Postgres: `127.0.0.1:5433`
-- Redis: `127.0.0.1:6379`
+실행 방법은 [docs/SETUP.md](./docs/SETUP.md)를 참고하세요.
 
-### 3. 마이그레이션
-```bash
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py makemigrations
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py migrate
-```
-
-### 4. Django 서버 실행
-```bash
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver
-```
-
-### 5. Celery 워커 실행
-AI 작업(등록 분석, 저작물 검증, 워터마크 삽입)은 Celery + Redis 큐로 처리됩니다.
-로컬 테스트 시 Django 서버와 별도로 워커를 반드시 띄워야 합니다.
-
-```bash
-DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config worker -l info -Q ai,default
-```
-
-### 6. 관리자 계정 생성
-```bash
-DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py createsuperuser
-```
-
-## Redis/Celery 없이 로컬 서버만 확인
-Redis와 Celery 워커를 띄우지 않고 API 서버 구동 여부만 확인하려면 fake 모드를 사용할 수 있습니다.
-
-```bash
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-BACKEND
-USE_FAKE_REDIS=1 USE_FAKE_CELERY=1 DJANGO_SETTINGS_MODULE=config.settings.dev .venv/bin/python manage.py runserver 127.0.0.1:8000
-```
-
-이 방식은 로컬 서버 기동과 일반 API 확인용입니다. 실제 비동기 분석, 검증, 워터마크 작업까지 확인하려면 아래처럼 Docker Compose의 Redis와 Celery 워커를 함께 실행해야 합니다.
-
-서버 상태만 확인:
-
-```bash
-USE_FAKE_REDIS=1 USE_FAKE_CELERY=1 DJANGO_SETTINGS_MODULE=config.settings.dev .venv/bin/python manage.py check
-```
-
-## 한 번에 필요한 로컬 프로세스
-
-실제 비동기 기능까지 확인하는 실행 조합:
-
-1. `docker compose up -d`
-2. `DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver`
-3. `DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config worker -l info -Q ai,default`
-
-Celery 워커가 없으면 아래 기능은 응답이 `queued`에서 멈춥니다.
-
-- 저작물 등록 분석
-- 저작물 검증
-- 워터마크 삽입
-
-## 프론트엔드와 함께 실행
-백엔드를 먼저 실행한 뒤 프론트 개발 서버를 각각 별도 터미널에서 실행합니다.
-
-사용자 프론트:
-
-```bash
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-FRONTEND/verimarka-frontend
-npm install
-npm run dev
-```
-
-관리자 프론트:
-
-```bash
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-admin-frontend
-npm install
-npm run dev
-```
-
-접속 주소:
-
-- 백엔드: `http://127.0.0.1:8000/`
-- 사용자 프론트: `http://127.0.0.1:5173/`
-- 관리자 프론트: `http://127.0.0.1:4173/`
-
-포트를 명시해서 실행해야 할 때는 아래처럼 실행합니다.
-
-```bash
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-FRONTEND/verimarka-frontend
-npm run dev -- --host 127.0.0.1 --port 5173
-
-cd /Users/emfpdlzj/Desktop/verimarka/verimarka-admin-frontend
-npm run dev -- --host 127.0.0.1 --port 4173
-```
-
-## 자주 쓰는 확인 명령
-
-### DB / Redis 상태 확인
-```bash
-docker compose ps
-```
-
-### Redis 응답 확인
-```bash
-redis-cli -p 6379 ping
-```
-
-### Celery 워커 큐 확인
-```bash
-DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect active
-DJANGO_SETTINGS_MODULE=config.settings.dev celery -A config inspect reserved
-```
-
-## 코드 포맷 / pre-commit
-
-이 저장소는 `ruff check --fix` 와 `ruff format` 을 pre-commit 훅으로 사용합니다.
-
-수동 실행:
-
-```bash
-ruff check . --fix
-ruff format .
-```
-
-전체 파일에 훅 실행:
-
-```bash
-pre-commit run --all-files
-```
-
-## 로깅
-
-백엔드는 공통 콘솔 로깅과 `X-Request-Id` 기반 요청 추적을 사용합니다.
-
-- 모든 응답에 `X-Request-Id` 헤더가 추가됩니다.
-- 로그 포맷에는 시간, 레벨, `request_id`, 로거명, 라인번호가 포함됩니다.
-- 로그 레벨은 `DJANGO_LOG_LEVEL` 환경변수로 조절합니다.
-
-예:
-
-```bash
-DJANGO_LOG_LEVEL=DEBUG
-```
-
-## 운영 compose
-
-운영은 별도 파일을 사용합니다.
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-## 백엔드 CI/CD
-
-GitHub Actions 워크플로는 `main` 브랜치 push 또는 수동 실행 시 운영 서버에 SSH 접속해서 백엔드 리포지토리를 갱신한 뒤, 아래 명령을 실행합니다.
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-워크플로 파일:
-`/.github/workflows/deploy-backend.yml`
-
-필수 GitHub Secrets:
-- `BACKEND_DEPLOY_HOST`
-- `BACKEND_DEPLOY_PORT`
-- `BACKEND_DEPLOY_USER`
-- `BACKEND_DEPLOY_SSH_KEY`
-- `BACKEND_DEPLOY_PATH`
-
-선택 GitHub Secrets:
-- `BACKEND_DEPLOY_BRANCH`
-- `BACKEND_HEALTHCHECK_URL`
-- `BACKEND_HEALTHCHECK_RETRIES`
-- `BACKEND_HEALTHCHECK_INTERVAL_SECONDS`
-
-권장 운영값:
-- `BACKEND_DEPLOY_BRANCH`: `main`
-- `BACKEND_DEPLOY_PATH`: 운영 서버의 `verimarka-BACKEND` 리포지토리 경로
-  예: `/opt/verimarka/verimarka-BACKEND`
-- `BACKEND_HEALTHCHECK_URL`: 배포 후 확인할 API 주소
-  예: `https://verimarka.com/api/health/`
-- `BACKEND_HEALTHCHECK_RETRIES`: 헬스체크 재시도 횟수
-- `BACKEND_HEALTHCHECK_INTERVAL_SECONDS`: 헬스체크 재시도 간격(초)
-
-주의:
-- 운영 서버의 `BACKEND_DEPLOY_PATH` 는 이미 `origin` 이 `WATSON-AJOU/WATSON-BACKEND` 로 연결되어 있어야 합니다.
-- 운영 서버에 `docker`, `docker compose`, `git`, `curl` 이 설치되어 있어야 합니다.
-- 운영용 `.env.prod` 는 서버에만 두고 GitHub Secrets 로 올리지 않는 전제를 사용합니다.
-- 배포 중 `git pull`, `docker compose up -d --build`, `BACKEND_HEALTHCHECK_URL` 검증 중 하나라도 실패하면 직전 git SHA로 자동 롤백합니다.
-- 기본 헬스 엔드포인트는 `GET /api/health/` 입니다.
-
-## 운영 인증서 발급 / 갱신
-
-도메인 구성:
-
-- `verimarka.com` → 사용자용 웹사이트
-- `www.verimarka.com` → 사용자용 웹사이트
-- `admin.verimarka.com` → 관리자 웹사이트
-
-현재 nginx는 하나의 Let's Encrypt 인증서에 위 3개 도메인이 함께 포함된 SAN 인증서를 사용하도록 되어 있습니다.
-
-최초 발급 또는 `admin.verimarka.com` 추가 발급:
-
-```bash
-docker compose -f docker-compose.prod.yml run --rm certbot certonly \
-  --webroot -w /var/www/certbot \
-  -d verimarka.com \
-  -d www.verimarka.com \
-  -d admin.verimarka.com
-```
-
-발급 후 nginx 재시작:
-
-```bash
-docker compose -f docker-compose.prod.yml restart verimarka-nginx
-```
-
-주의:
-
-- `admin.verimarka.com` DNS가 현재 서버를 가리켜야 합니다.
-- 80 포트가 외부에서 접근 가능해야 webroot 인증이 통과합니다.
-
-## 앱 구조
-```text
-accounts   : 회원가입, 로그인, OAuth, SMS 인증, 프로필, 권한
-contents   : 이미지 원본 업로드, 상태 관리, 결과 파일
-analysis   : AI 판정 요청/응답, 유사도 결과, 후보 이미지, 비동기 작업 큐
-reviews    : REVIEW 상태 케이스, 투표, 투표 결과
-tokens     : NFT 발행, 토큰 메타데이터, 컨트랙트 연동 결과
-wallets    : 지갑 연동, 주소 저장, provider 정보
-logs       : 판정 로그, 검증 이력, 분쟁 대응 로그
-```
-
-## 참고
-
-- dev 환경에서도 현재 구조상 S3 업로드를 전제로 동작하는 기능이 있습니다.
-- `verify`, `register`, `watermark`는 큐 기반이라 Redis + Celery가 빠지면 정상 동작하지 않습니다.
-- 의존성 변경 후에는 필요 시 `pip freeze > requirements.txt`로 반영합니다.

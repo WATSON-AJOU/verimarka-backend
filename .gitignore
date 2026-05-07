@@ -9,7 +9,14 @@ __pycache__/
 *.pyd
 .env.dev
 .env.prod
+.env.proddocker
+.env
+.env.*
+!.env.example
 
 .agents/skills/testing/*
 
 test_media/*
+
+deploy/certbot/conf/
+deploy/certbot/www/
