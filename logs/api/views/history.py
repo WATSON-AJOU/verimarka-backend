@@ -280,7 +280,7 @@ class PublicRecentActivityView(APIView):
                     "extra": blockchain.get("network_name") or "",
                     "progress": None,
                     "tone": content.decision or content.status,
-                    "previewUrl": build_content_preview_url(request, content),
+                    "preview_url": build_content_preview_url(request, content),
                     "blockchain": blockchain,
                 }
             )

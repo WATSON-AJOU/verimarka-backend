@@ -5,7 +5,6 @@ from rest_framework.test import APIClient
 
 from contents.models import Content
 
-
 User = get_user_model()
 
 
@@ -56,7 +55,12 @@ class AnalysisHistoryViewTests(TestCase):
             top_phash_dist=6,
             blockchain={
                 "mint_kind": "review_vote",
-                "vote": {"status": "Rejected", "upvotes": 3, "downvotes": 7, "end_time_display": "2026.04.17 12:00"},
+                "vote": {
+                    "status": "Rejected",
+                    "upvotes": 3,
+                    "downvotes": 7,
+                    "end_time_display": "2026.04.17 12:00",
+                },
             },
         )
 
@@ -83,7 +87,12 @@ class AnalysisHistoryViewTests(TestCase):
             top_phash_dist=7,
             blockchain={
                 "mint_kind": "review_vote",
-                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
+                "vote": {
+                    "status": "Approved",
+                    "upvotes": 8,
+                    "downvotes": 2,
+                    "end_time_display": "2026.04.17 12:00",
+                },
             },
         )
 
@@ -112,7 +121,12 @@ class AnalysisHistoryViewTests(TestCase):
                 "mint_kind": "review_vote",
                 "network_name": "Sepolia",
                 "token_id": 77,
-                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
+                "vote": {
+                    "status": "Approved",
+                    "upvotes": 8,
+                    "downvotes": 2,
+                    "end_time_display": "2026.04.17 12:00",
+                },
             },
             watermark={"applied": False},
         )
@@ -143,7 +157,12 @@ class AnalysisHistoryViewTests(TestCase):
                 "network_name": "Sepolia",
                 "token_id": 88,
                 "tx_hash": "0x1234567890abcdef",
-                "vote": {"status": "Approved", "upvotes": 8, "downvotes": 2, "end_time_display": "2026.04.17 12:00"},
+                "vote": {
+                    "status": "Approved",
+                    "upvotes": 8,
+                    "downvotes": 2,
+                    "end_time_display": "2026.04.17 12:00",
+                },
             },
             watermark={"applied": True, "output_url": "/media/watermarked.png"},
         )
@@ -153,3 +172,37 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 2)
+
+
+class PublicRecentActivityViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="recent-user",
+            nickname="recentuser",
+            display_name="Recent User",
+            email="recent@example.com",
+            password="password1234",
+        )
+
+    def test_public_recent_activity_returns_frontend_preview_key(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="image",
+            status="allow",
+            decision="allow",
+            original_file="",
+            original_filename="recent.png",
+            mime_type="image/png",
+            file_size=123,
+            reason="등록 승인",
+            blockchain={"network_name": "Sepolia"},
+        )
+
+        response = self.client.get(reverse("public_recent_activity"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertIn("preview_url", payload[0])
+        self.assertNotIn("previewUrl", payload[0])
