@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 
 from contents.api.utils import build_content_preview_url, format_review_vote_summary
 from contents.models import Content
+from contents.storage import S3StorageService
 from logs.api.utils import (
     content_image_urls,
     extract_metric_fallback,
@@ -235,7 +236,15 @@ class AnalysisHistoryView(APIView):
         }
         return [review_result_item, item] if review_result_item else [item]
 
+    def _verification_uploaded_preview_url(self, item: VerificationHistoryLog):
+        if item.uploaded_storage_key and S3StorageService.is_enabled():
+            return S3StorageService.generate_presigned_get_url(
+                key=item.uploaded_storage_key
+            )
+        return item.uploaded_preview_url
+
     def _serialize_verification(self, item: VerificationHistoryLog):
+        uploaded_preview_url = self._verification_uploaded_preview_url(item)
         return {
             "id": str(item.id),
             "type": "verify",
@@ -247,8 +256,8 @@ class AnalysisHistoryView(APIView):
             "phash": format_phash((item.candidate or {}).get("phash_dist")),
             "extra": (item.candidate or {}).get("summary")
             or ((item.blockchain or {}).get("verification_link") or "-"),
-            "preview_url": item.uploaded_preview_url,
-            "original_preview_url": item.uploaded_preview_url,
+            "preview_url": uploaded_preview_url,
+            "original_preview_url": uploaded_preview_url,
             "comparison_preview_url": (item.candidate or {}).get("preview_url"),
             "comparison_file_name": (item.candidate or {}).get("file_name"),
             "comparison_public_id": None,

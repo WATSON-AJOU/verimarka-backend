@@ -1,8 +1,8 @@
 import re
 from pathlib import Path
 
-from rest_framework import serializers
 from django.utils import timezone
+from rest_framework import serializers
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {
@@ -12,15 +12,29 @@ ALLOWED_IMAGE_MIME_TYPES = {
 ALLOWED_DOCUMENT_MIME_TYPES = {
     "application/pdf": {".pdf"},
     "application/msword": {".doc"},
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+        ".docx"
+    },
 }
 ALLOWED_UPLOAD_MIME_TYPES = {
     **ALLOWED_IMAGE_MIME_TYPES,
     **ALLOWED_DOCUMENT_MIME_TYPES,
 }
-ALLOWED_IMAGE_EXTENSIONS = {ext for extensions in ALLOWED_IMAGE_MIME_TYPES.values() for ext in extensions}
-ALLOWED_DOCUMENT_EXTENSIONS = {ext for extensions in ALLOWED_DOCUMENT_MIME_TYPES.values() for ext in extensions}
-ALLOWED_UPLOAD_EXTENSIONS = {ext for extensions in ALLOWED_UPLOAD_MIME_TYPES.values() for ext in extensions}
+ALLOWED_IMAGE_EXTENSIONS = {
+    ext for extensions in ALLOWED_IMAGE_MIME_TYPES.values() for ext in extensions
+}
+ALLOWED_DOCUMENT_EXTENSIONS = {
+    ext for extensions in ALLOWED_DOCUMENT_MIME_TYPES.values() for ext in extensions
+}
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ext for extensions in ALLOWED_UPLOAD_MIME_TYPES.values() for ext in extensions
+}
+GENERIC_UPLOAD_MIME_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
+MIME_TYPE_BY_EXTENSION = {
+    ext: mime_type
+    for mime_type, extensions in ALLOWED_UPLOAD_MIME_TYPES.items()
+    for ext in extensions
+}
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MULTISPACE_RE = re.compile(r"\s+")
 _SAFE_FILE_STEM_RE = re.compile(r"[^0-9A-Za-z가-힣._()\- ]+")
@@ -38,12 +52,16 @@ def normalize_uploaded_filename(name: str, *, mime_type: str | None = None) -> s
 
     extension = Path(basename).suffix.lower()
     if extension not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise serializers.ValidationError("JPG, PNG, PDF, DOC, DOCX 파일만 업로드할 수 있습니다.")
+        raise serializers.ValidationError(
+            "JPG, PNG, PDF, DOC, DOCX 파일만 업로드할 수 있습니다."
+        )
 
     normalized_mime_type = (mime_type or "").lower()
     allowed_extensions = ALLOWED_UPLOAD_MIME_TYPES.get(normalized_mime_type)
     if allowed_extensions and extension not in allowed_extensions:
-        raise serializers.ValidationError("파일 확장자와 MIME 타입이 일치하지 않습니다.")
+        raise serializers.ValidationError(
+            "파일 확장자와 MIME 타입이 일치하지 않습니다."
+        )
 
     stem = Path(basename).stem.strip()
     if not stem:
@@ -87,8 +105,14 @@ def validate_uploaded_image_file(upload):
 
 def validate_uploaded_content_file(upload):
     mime_type = (getattr(upload, "content_type", "") or "").lower()
-    if mime_type not in ALLOWED_UPLOAD_MIME_TYPES:
-        raise serializers.ValidationError("JPG, PNG, PDF, DOC, DOCX 파일만 업로드할 수 있습니다.")
+    normalize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
+    if (
+        mime_type not in ALLOWED_UPLOAD_MIME_TYPES
+        and mime_type not in GENERIC_UPLOAD_MIME_TYPES
+    ):
+        raise serializers.ValidationError(
+            "JPG, PNG, PDF, DOC, DOCX 파일만 업로드할 수 있습니다."
+        )
 
     file_size = getattr(upload, "size", 0) or 0
     if file_size <= 0:
@@ -96,8 +120,24 @@ def validate_uploaded_content_file(upload):
     if file_size > MAX_IMAGE_BYTES:
         raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
 
-    normalize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
     return upload
+
+
+def resolve_upload_mime_type(upload) -> str:
+    mime_type = (getattr(upload, "content_type", "") or "").lower()
+    if mime_type in ALLOWED_UPLOAD_MIME_TYPES:
+        return mime_type
+
+    if mime_type in GENERIC_UPLOAD_MIME_TYPES:
+        filename = normalize_uploaded_filename(
+            getattr(upload, "name", ""), mime_type=mime_type
+        )
+        extension = Path(filename).suffix.lower()
+        inferred_mime_type = MIME_TYPE_BY_EXTENSION.get(extension)
+        if inferred_mime_type:
+            return inferred_mime_type
+
+    raise serializers.ValidationError("지원하지 않는 파일 형식입니다.")
 
 
 def resolve_content_type_from_mime(mime_type: str | None) -> str:

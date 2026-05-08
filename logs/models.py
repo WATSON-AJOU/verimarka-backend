@@ -16,6 +16,7 @@ class VerificationHistoryLog(models.Model):
     outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES)
     uploaded_file_name = models.CharField(max_length=255)
     uploaded_file_size = models.PositiveBigIntegerField(default=0)
+    uploaded_storage_key = models.CharField(max_length=500, blank=True)
     uploaded_preview_url = models.URLField(max_length=2048, blank=True, null=True)
     detect = models.JSONField(default=dict, blank=True)
     blockchain = models.JSONField(default=dict, blank=True)

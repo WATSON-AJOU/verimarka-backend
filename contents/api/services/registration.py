@@ -10,7 +10,12 @@ from django.utils import timezone
 from analysis.api.services import AnalysisGuardService
 from analysis.contracts import GuardRequestV1
 from contents.document_service import ContentDocumentAIService
-from contents.input_safety import normalize_uploaded_filename, resolve_content_type_from_mime, sanitize_uploaded_filename
+from contents.input_safety import (
+    normalize_uploaded_filename,
+    resolve_content_type_from_mime,
+    resolve_upload_mime_type,
+    sanitize_uploaded_filename,
+)
 from contents.models import Content
 from contents.storage import S3StorageService
 
@@ -22,7 +27,7 @@ class ContentRegistrationService:
     def write_temp_file_with_hash(cls, upload) -> tuple[Path, str]:
         safe_name = sanitize_uploaded_filename(
             getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
+            mime_type=resolve_upload_mime_type(upload),
         )
         suffix = Path(safe_name).suffix or ".bin"
         digest = sha256()
@@ -36,7 +41,9 @@ class ContentRegistrationService:
     @classmethod
     def register_image(cls, *, user, upload) -> Content:
         temp_path, source_sha256 = cls.write_temp_file_with_hash(upload)
-        content = cls.create_pending_content(user=user, upload=upload, source_sha256=source_sha256)
+        content = cls.create_pending_content(
+            user=user, upload=upload, source_sha256=source_sha256
+        )
 
         try:
             source_input = cls._build_source_input(content, temp_path=temp_path)
@@ -46,12 +53,16 @@ class ContentRegistrationService:
                 source_input,
             )
 
-            return cls.run_guard_for_content(content=content, user_id=user.id, source_input=source_input)
+            return cls.run_guard_for_content(
+                content=content, user_id=user.id, source_input=source_input
+            )
         finally:
             temp_path.unlink(missing_ok=True)
 
     @classmethod
-    def register_document(cls, *, content: Content, user, source_input: dict[str, str]) -> Content:
+    def register_document(
+        cls, *, content: Content, user, source_input: dict[str, str]
+    ) -> Content:
         request_dict = {
             "job_id": str(content.public_id),
             "input": {
@@ -63,18 +74,22 @@ class ContentRegistrationService:
                 "user_id": str(user.id),
                 "content_id": str(content.public_id),
             },
-            "document_type": getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+            "document_type": getattr(
+                settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"
+            ),
         }
         result = ContentDocumentAIService.run_register_workflow_v1(request_dict)
         return cls.apply_document_register_result(content=content, result=result)
 
     @classmethod
-    def create_pending_content(cls, *, user, upload, source_sha256: str = "") -> Content:
-        mime_type = getattr(upload, "content_type", "") or "application/octet-stream"
+    def create_pending_content(
+        cls, *, user, upload, source_sha256: str = ""
+    ) -> Content:
+        mime_type = resolve_upload_mime_type(upload)
         content_type = resolve_content_type_from_mime(mime_type)
         display_filename = normalize_uploaded_filename(
             getattr(upload, "name", ""),
-            mime_type=mime_type or None,
+            mime_type=mime_type,
         )
         content = Content.objects.create(
             owner=user,
@@ -107,7 +122,9 @@ class ContentRegistrationService:
         existing_content: Content,
         temp_path: Path | None = None,
     ) -> Content:
-        content = cls.create_pending_content(user=user, upload=upload, source_sha256=source_sha256)
+        content = cls.create_pending_content(
+            user=user, upload=upload, source_sha256=source_sha256
+        )
         if temp_path is not None:
             try:
                 cls._build_source_input(content, temp_path=temp_path)
@@ -132,7 +149,9 @@ class ContentRegistrationService:
             "file_name": existing_content.original_filename,
             "preview_url": cls._resolve_content_image_url(existing_content),
             "owner_name": cls._resolve_owner_name(existing_content),
-            "registered_at": timezone.localtime(existing_content.created_at).strftime("%Y.%m.%d %H:%M"),
+            "registered_at": timezone.localtime(existing_content.created_at).strftime(
+                "%Y.%m.%d %H:%M"
+            ),
             "summary": "동일 원본 이미지가 기존 등록 기록과 일치합니다.",
         }
         content.candidates = [content.top_match]
@@ -161,7 +180,9 @@ class ContentRegistrationService:
         return content
 
     @classmethod
-    def apply_document_register_result(cls, *, content: Content, result: dict) -> Content:
+    def apply_document_register_result(
+        cls, *, content: Content, result: dict
+    ) -> Content:
         watermark = result.get("watermark") or {}
         assets = result.get("assets") or {}
         ocr_summary = result.get("ocr_summary") or {}
@@ -183,19 +204,23 @@ class ContentRegistrationService:
             content.reason = result.get("reason") or "문서 등록 처리에 실패했습니다."
             content.next_action = "none"
 
-        content.original_storage_key = assets.get("original_s3_key") or content.original_storage_key
+        content.original_storage_key = (
+            assets.get("original_s3_key") or content.original_storage_key
+        )
         content.watermark = {
             "requested": True,
             "applied": bool(watermark.get("applied")),
             "payload_id": watermark.get("payload_id"),
-            "output_key": watermark.get("output_key") or assets.get("watermarked_s3_key"),
+            "output_key": watermark.get("output_key")
+            or assets.get("watermarked_s3_key"),
             "output_path": watermark.get("output_path"),
             "page_results": watermark.get("page_results") or [],
             "document_decision": raw_decision,
             "pending_actions": result.get("pending_actions") or [],
         }
         content.document_metadata = {
-            "document_type": result.get("document_type") or getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+            "document_type": result.get("document_type")
+            or getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
             "ocr_summary": ocr_summary,
             "ocr_raw_s3_key": assets.get("ocr_raw_s3_key"),
             "watermarked_s3_key": assets.get("watermarked_s3_key"),
@@ -218,7 +243,9 @@ class ContentRegistrationService:
         return content
 
     @classmethod
-    def run_guard_for_content(cls, *, content: Content, user_id: int, source_input: dict[str, str]) -> Content:
+    def run_guard_for_content(
+        cls, *, content: Content, user_id: int, source_input: dict[str, str]
+    ) -> Content:
         guard_request = GuardRequestV1(
             job_id=str(content.public_id),
             mode="register",
@@ -260,8 +287,13 @@ class ContentRegistrationService:
         content.next_action = response.next_action
         content.top_cosine = response.scores.top_cosine
         content.top_phash_dist = response.scores.top_phash_dist
-        content.top_match = cls._enrich_match(response.top_match.model_dump() if response.top_match else {})
-        content.candidates = [cls._enrich_match(candidate.model_dump()) for candidate in response.candidates]
+        content.top_match = cls._enrich_match(
+            response.top_match.model_dump() if response.top_match else {}
+        )
+        content.candidates = [
+            cls._enrich_match(candidate.model_dump())
+            for candidate in response.candidates
+        ]
         content.watermark = response.watermark.model_dump()
         content.timing_ms = response.timing_ms.model_dump()
         content.analyzed_at = timezone.now()
@@ -289,7 +321,9 @@ class ContentRegistrationService:
         return temp_path
 
     @classmethod
-    def _build_source_input(cls, content: Content, *, temp_path: Path) -> dict[str, str]:
+    def _build_source_input(
+        cls, content: Content, *, temp_path: Path
+    ) -> dict[str, str]:
         if not S3StorageService.is_enabled():
             resolved_path = str(temp_path.resolve())
             logger.info(
@@ -349,7 +383,9 @@ class ContentRegistrationService:
             "preview_url": cls._resolve_content_image_url(candidate),
             "public_id": str(candidate.public_id),
             "owner_name": cls._resolve_owner_name(candidate),
-            "registered_at": timezone.localtime(candidate.created_at).strftime("%Y.%m.%d %H:%M"),
+            "registered_at": timezone.localtime(candidate.created_at).strftime(
+                "%Y.%m.%d %H:%M"
+            ),
         }
 
     @classmethod
@@ -377,11 +413,15 @@ class ContentRegistrationService:
         if output_url:
             if output_url.startswith(("http://", "https://")):
                 return output_url
-            base_url = getattr(settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com").rstrip("/")
+            base_url = getattr(
+                settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com"
+            ).rstrip("/")
             return f"{base_url}{output_url}"
 
         if content.original_storage_key and S3StorageService.is_enabled():
-            return S3StorageService.generate_presigned_get_url(key=content.original_storage_key)
+            return S3StorageService.generate_presigned_get_url(
+                key=content.original_storage_key
+            )
 
         if content.original_file:
             return content.original_file.url

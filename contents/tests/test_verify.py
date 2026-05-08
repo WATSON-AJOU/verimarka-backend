@@ -4,10 +4,14 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from analysis.contracts import GuardResponseV1, GuardScoresV1, GuardTimingV1, GuardWatermarkResultV1
-from logs.models import VerificationHistoryLog
+from analysis.contracts import (
+    GuardResponseV1,
+    GuardScoresV1,
+    GuardTimingV1,
+    GuardWatermarkResultV1,
+)
 from contents.verification_service import ContentVerificationService
-
+from logs.models import VerificationHistoryLog
 
 User = get_user_model()
 
@@ -24,13 +28,22 @@ class ContentVerifyTests(TestCase):
             phone_verified=True,
         )
 
-    @patch("contents.verification_service.S3StorageService.is_enabled", return_value=False)
+    @patch(
+        "contents.verification_service.S3StorageService.is_enabled", return_value=False
+    )
     @patch("contents.verification_service.AnalysisGuardService.run_guard_v1")
     @patch("contents.verification_service.WatermarkAIService.detect")
-    def test_verify_result_preserves_display_filename(self, mocked_detect, mocked_guard, _mocked_storage):
+    def test_verify_result_preserves_display_filename(
+        self, mocked_detect, mocked_guard, _mocked_storage
+    ):
         mocked_detect.return_value = {
             "success": True,
-            "result": {"detected": False, "payload_id": None, "confidence": 0.0, "bit_accuracy": 0.0},
+            "result": {
+                "detected": False,
+                "payload_id": None,
+                "confidence": 0.0,
+                "bit_accuracy": 0.0,
+            },
         }
         mocked_guard.return_value = GuardResponseV1(
             job_id="job-verify-1",
@@ -40,7 +53,9 @@ class ContentVerifyTests(TestCase):
             decision="allow",
             reason="No strong near-duplicate found",
             next_action="none",
-            scores=GuardScoresV1(top_cosine=0.12, top_phash_dist=28, policy_version="v1"),
+            scores=GuardScoresV1(
+                top_cosine=0.12, top_phash_dist=28, policy_version="v1"
+            ),
             top_match=None,
             candidates=[],
             watermark=GuardWatermarkResultV1(
@@ -51,10 +66,16 @@ class ContentVerifyTests(TestCase):
                 scaling_w=2.0,
                 proportion_masked=0.65,
             ),
-            timing_ms=GuardTimingV1(download=5, embed=10, ann_search=3, phash=1, total=19),
+            timing_ms=GuardTimingV1(
+                download=5, embed=10, ann_search=3, phash=1, total=19
+            ),
         )
 
-        upload = SimpleUploadedFile("../../verify file!!.png", b"\x89PNG\r\n\x1a\nverifycontent", content_type="image/png")
+        upload = SimpleUploadedFile(
+            "../../verify file!!.png",
+            b"\x89PNG\r\n\x1a\nverifycontent",
+            content_type="image/png",
+        )
         payload = ContentVerificationService.verify_image(user=self.user, upload=upload)
 
         VerificationHistoryLog.objects.create(
@@ -70,5 +91,83 @@ class ContentVerifyTests(TestCase):
         )
 
         log = VerificationHistoryLog.objects.get()
-        self.assertEqual((payload.get("uploaded") or {}).get("file_name"), "verify file!!.png")
+        self.assertEqual(
+            (payload.get("uploaded") or {}).get("file_name"), "verify file!!.png"
+        )
+        self.assertTrue(
+            (payload.get("uploaded") or {}).get("preview_url", "").endswith(".png")
+        )
         self.assertEqual(log.uploaded_file_name, "verify file!!.png")
+
+    @patch(
+        "contents.verification_service.S3StorageService.is_enabled", return_value=True
+    )
+    @patch(
+        "contents.verification_service.S3StorageService.generate_presigned_get_url",
+        return_value="https://cdn.example.com/verify/upload.png",
+    )
+    @patch("contents.verification_service.S3StorageService.upload_file")
+    @patch(
+        "contents.verification_service.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/verify/upload.png",
+    )
+    @patch(
+        "contents.verification_service.S3StorageService.build_content_key",
+        return_value="verify/upload.png",
+    )
+    @patch("contents.verification_service.AnalysisGuardService.run_guard_v1")
+    @patch("contents.verification_service.WatermarkAIService.detect")
+    def test_verify_result_keeps_uploaded_preview_url(
+        self,
+        mocked_detect,
+        mocked_guard,
+        _mocked_build_content_key,
+        _mocked_build_s3_uri,
+        _mocked_upload_file,
+        _mocked_generate_url,
+        _mocked_storage,
+    ):
+        mocked_detect.return_value = {
+            "success": True,
+            "result": {
+                "detected": False,
+                "payload_id": None,
+                "confidence": 0.0,
+                "bit_accuracy": 0.0,
+            },
+        }
+        mocked_guard.return_value = GuardResponseV1(
+            job_id="job-verify-2",
+            mode="register",
+            content_type="image",
+            success=True,
+            decision="allow",
+            reason="No strong near-duplicate found",
+            next_action="none",
+            scores=GuardScoresV1(
+                top_cosine=0.12, top_phash_dist=28, policy_version="v1"
+            ),
+            top_match=None,
+            candidates=[],
+            watermark=GuardWatermarkResultV1(
+                requested=True,
+                applied=False,
+                model="wam",
+                nbits=32,
+                scaling_w=2.0,
+                proportion_masked=0.65,
+            ),
+            timing_ms=GuardTimingV1(
+                download=5, embed=10, ann_search=3, phash=1, total=19
+            ),
+        )
+
+        upload = SimpleUploadedFile(
+            "upload.png", b"\x89PNG\r\n\x1a\nverifycontent", content_type="image/png"
+        )
+        payload = ContentVerificationService.verify_image(user=self.user, upload=upload)
+
+        self.assertEqual(
+            (payload.get("uploaded") or {}).get("preview_url"),
+            "https://cdn.example.com/verify/upload.png",
+        )

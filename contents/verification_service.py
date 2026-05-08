@@ -6,16 +6,20 @@ from pathlib import Path
 from django.conf import settings
 from django.utils import timezone
 
-from analysis.contracts import GuardRequestV1
 from analysis.api.services import AIIntegrationError, AnalysisGuardService
+from analysis.contracts import GuardRequestV1
 from analysis.watermark_services import WatermarkAIService
 
+from .api.services import ContentRegistrationService
 from .blockchain_service import ContentBlockchainService
 from .document_service import ContentDocumentAIService
-from .input_safety import normalize_uploaded_filename, sanitize_uploaded_filename
-from .input_safety import resolve_content_type_from_mime
+from .input_safety import (
+    normalize_uploaded_filename,
+    resolve_content_type_from_mime,
+    resolve_upload_mime_type,
+    sanitize_uploaded_filename,
+)
 from .models import Content
-from .api.services import ContentRegistrationService
 from .storage import S3StorageService
 
 logger = logging.getLogger(__name__)
@@ -24,9 +28,9 @@ logger = logging.getLogger(__name__)
 class ContentVerificationService:
     @classmethod
     def verify_image(cls, *, user, upload) -> dict:
+        upload_content_type = resolve_upload_mime_type(upload)
         upload_name = normalize_uploaded_filename(
-            getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
+            getattr(upload, "name", ""), mime_type=upload_content_type
         )
         temp_path = cls._write_temp_file(upload)
         try:
@@ -35,10 +39,11 @@ class ContentVerificationService:
                 user=user,
                 upload_name=upload_name,
                 upload_size=upload.size,
-                upload_content_type=getattr(upload, "content_type", "") or "application/octet-stream",
-                content_type=resolve_content_type_from_mime(getattr(upload, "content_type", "") or "application/octet-stream"),
+                upload_content_type=upload_content_type,
+                content_type=resolve_content_type_from_mime(upload_content_type),
                 source_input=source_input,
                 temp_path=temp_path,
+                uploaded_preview_url=source_input.get("url"),
             )
         finally:
             try:
@@ -57,8 +62,11 @@ class ContentVerificationService:
         content_type: str,
         source_input: dict[str, str],
         temp_path: Path | None = None,
+        uploaded_preview_url: str | None = None,
     ) -> dict:
-        upload_name = normalize_uploaded_filename(upload_name, mime_type=upload_content_type)
+        upload_name = normalize_uploaded_filename(
+            upload_name, mime_type=upload_content_type
+        )
         if content_type == "document":
             return cls._verify_document_from_source_input(
                 user=user,
@@ -112,6 +120,7 @@ class ContentVerificationService:
                 upload_size=upload_size,
                 temp_path=temp_path,
                 detect_result=detect_result,
+                uploaded_preview_url=uploaded_preview_url or source_input.get("url"),
             )
             if verified_payload:
                 logger.info(
@@ -119,7 +128,11 @@ class ContentVerificationService:
                     getattr(user, "id", None),
                     verify_job_id,
                     ((verified_payload.get("blockchain") or {}).get("token_id")),
-                    ((verified_payload.get("blockchain") or {}).get("verification_link")),
+                    (
+                        (verified_payload.get("blockchain") or {}).get(
+                            "verification_link"
+                        )
+                    ),
                 )
                 return verified_payload
             logger.info(
@@ -141,6 +154,7 @@ class ContentVerificationService:
             upload_size=upload_size,
             upload_content_type=upload_content_type,
             source_input=source_input,
+            uploaded_preview_url=uploaded_preview_url or source_input.get("url"),
         )
 
     @classmethod
@@ -165,7 +179,9 @@ class ContentVerificationService:
                 "meta": {
                     "user_id": str(getattr(user, "id", "")),
                 },
-                "document_type": getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
+                "document_type": getattr(
+                    settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"
+                ),
             }
         )
 
@@ -209,7 +225,9 @@ class ContentVerificationService:
                 "file_size": upload_size,
                 "preview_url": None,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
-                "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
+                "verifier_name": getattr(user, "display_name", "")
+                or getattr(user, "nickname", "")
+                or "게스트",
             },
             "detect": {
                 "detected": False,
@@ -228,7 +246,16 @@ class ContentVerificationService:
         }
 
     @classmethod
-    def _build_verified_result(cls, *, user, upload_name: str, upload_size: int, temp_path: Path | None, detect_result: dict) -> dict | None:
+    def _build_verified_result(
+        cls,
+        *,
+        user,
+        upload_name: str,
+        upload_size: int,
+        temp_path: Path | None,
+        detect_result: dict,
+        uploaded_preview_url: str | None = None,
+    ) -> dict | None:
         wm_id = cls._resolve_wm_id(detect_result.get("payload_id"))
         blockchain = ContentBlockchainService._create_client()
 
@@ -257,8 +284,9 @@ class ContentVerificationService:
 
         token_id = verification.get("token_id")
         token_info = blockchain.get_document_info(token_id) if token_id else {}
-        image_url = cls._resolve_content_image_url(content)
-        author_name = verification.get("author_name") or ((content.blockchain or {}).get("author_name") if content else None)
+        author_name = verification.get("author_name") or (
+            (content.blockchain or {}).get("author_name") if content else None
+        )
 
         return {
             "outcome": "verified",
@@ -268,9 +296,11 @@ class ContentVerificationService:
             "uploaded": {
                 "file_name": upload_name,
                 "file_size": upload_size,
-                "preview_url": image_url,
+                "preview_url": uploaded_preview_url,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
-                "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
+                "verifier_name": getattr(user, "display_name", "")
+                or getattr(user, "nickname", "")
+                or "게스트",
             },
             "detect": {
                 "detected": True,
@@ -290,15 +320,30 @@ class ContentVerificationService:
                     getattr(blockchain, "chain_id", None),
                     f"Chain {getattr(blockchain, 'chain_id', '')}".strip(),
                 ),
-                "content_hash": f"0x{blockchain.compute_file_hash_sha256(temp_path.read_bytes()).hex()}" if temp_path else None,
-                "transaction_hash": (content.blockchain or {}).get("tx_hash") if content else None,
-                "minted_at": (content.blockchain or {}).get("minted_at_display") if content else None,
+                "content_hash": f"0x{blockchain.compute_file_hash_sha256(temp_path.read_bytes()).hex()}"
+                if temp_path
+                else None,
+                "transaction_hash": (content.blockchain or {}).get("tx_hash")
+                if content
+                else None,
+                "minted_at": (content.blockchain or {}).get("minted_at_display")
+                if content
+                else None,
                 "document": cls._json_safe(token_info),
             },
         }
 
     @classmethod
-    def _build_candidate_result(cls, *, user, upload_name: str, upload_size: int, upload_content_type: str, source_input: dict) -> dict:
+    def _build_candidate_result(
+        cls,
+        *,
+        user,
+        upload_name: str,
+        upload_size: int,
+        upload_content_type: str,
+        source_input: dict,
+        uploaded_preview_url: str | None = None,
+    ) -> dict:
         fallback_job_id = f"verify-fallback-{timezone.now().timestamp()}"
         guard_request = GuardRequestV1(
             job_id=fallback_job_id,
@@ -325,7 +370,9 @@ class ContentVerificationService:
         )
         response = AnalysisGuardService.run_guard_v1(guard_request.model_dump())
 
-        selected_match, candidate_content, candidate_preview_url = cls._select_displayable_candidate(response)
+        selected_match, candidate_content, candidate_preview_url = (
+            cls._select_displayable_candidate(response)
+        )
         candidate_owner = None
         candidate_registered_at = None
         candidate_file_name = None
@@ -338,7 +385,9 @@ class ContentVerificationService:
                 or candidate_content.owner.username
                 or candidate_content.owner.email
             )
-            candidate_registered_at = timezone.localtime(candidate_content.created_at).strftime("%Y.%m.%d %H:%M")
+            candidate_registered_at = timezone.localtime(
+                candidate_content.created_at
+            ).strftime("%Y.%m.%d %H:%M")
             candidate_file_name = candidate_content.original_filename
             candidate_public_id = str(candidate_content.public_id)
 
@@ -360,9 +409,11 @@ class ContentVerificationService:
             "uploaded": {
                 "file_name": upload_name,
                 "file_size": upload_size,
-                "preview_url": None,
+                "preview_url": uploaded_preview_url,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
-                "verifier_name": getattr(user, "display_name", "") or getattr(user, "nickname", "") or "게스트",
+                "verifier_name": getattr(user, "display_name", "")
+                or getattr(user, "nickname", "")
+                or "게스트",
             },
             "detect": {
                 "detected": False,
@@ -386,7 +437,9 @@ class ContentVerificationService:
         }
 
     @classmethod
-    def _select_displayable_candidate(cls, response) -> tuple[dict, Content | None, str | None]:
+    def _select_displayable_candidate(
+        cls, response
+    ) -> tuple[dict, Content | None, str | None]:
         matches: list[dict] = []
         if response.top_match:
             matches.append(response.top_match.model_dump())
@@ -400,7 +453,9 @@ class ContentVerificationService:
             if db_key:
                 seen_keys.add(db_key)
 
-            candidate_content = ContentRegistrationService._find_content_by_db_key(db_key)
+            candidate_content = ContentRegistrationService._find_content_by_db_key(
+                db_key
+            )
             preview_url = cls._resolve_match_preview_url(match, candidate_content)
             if preview_url:
                 return match, candidate_content, preview_url
@@ -411,7 +466,7 @@ class ContentVerificationService:
     def _write_temp_file(cls, upload) -> Path:
         safe_name = sanitize_uploaded_filename(
             getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
+            mime_type=resolve_upload_mime_type(upload),
         )
         suffix = Path(safe_name).suffix or ".png"
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -424,8 +479,9 @@ class ContentVerificationService:
     def _build_source_input(cls, *, temp_path: Path, upload) -> dict[str, str]:
         safe_name = sanitize_uploaded_filename(
             getattr(upload, "name", ""),
-            mime_type=getattr(upload, "content_type", "") or None,
+            mime_type=resolve_upload_mime_type(upload),
         )
+        upload_content_type = resolve_upload_mime_type(upload)
         if not S3StorageService.is_enabled():
             return {"url": str(temp_path.resolve())}
 
@@ -435,14 +491,14 @@ class ContentVerificationService:
             filename=safe_name,
             stage=(
                 settings.S3_PREFIX_DOC_VERIFY_REQUEST
-                if resolve_content_type_from_mime(getattr(upload, "content_type", "") or "application/octet-stream") == "document"
+                if resolve_content_type_from_mime(upload_content_type) == "document"
                 else "verify"
             ),
         )
         S3StorageService.upload_file(
             local_path=str(temp_path),
             key=key,
-            content_type=getattr(upload, "content_type", "") or "application/octet-stream",
+            content_type=upload_content_type,
         )
         logger.info(
             "contents.verify.source_mode mode=s3 key=%s bucket=%s",
@@ -477,11 +533,15 @@ class ContentVerificationService:
         if output_url:
             if output_url.startswith(("http://", "https://")):
                 return output_url
-            base_url = getattr(settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com").rstrip("/")
+            base_url = getattr(
+                settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com"
+            ).rstrip("/")
             return f"{base_url}{output_url}"
 
         if content.original_storage_key and S3StorageService.is_enabled():
-            return S3StorageService.generate_presigned_get_url(key=content.original_storage_key)
+            return S3StorageService.generate_presigned_get_url(
+                key=content.original_storage_key
+            )
 
         if content.original_file:
             return content.original_file.url
@@ -489,7 +549,9 @@ class ContentVerificationService:
         return None
 
     @classmethod
-    def _resolve_match_preview_url(cls, match: dict, content: Content | None) -> str | None:
+    def _resolve_match_preview_url(
+        cls, match: dict, content: Content | None
+    ) -> str | None:
         content_url = cls._resolve_content_image_url(content)
         if content_url:
             return content_url

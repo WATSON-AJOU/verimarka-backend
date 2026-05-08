@@ -31,7 +31,11 @@ from contents.api.utils import (
     is_vote_still_open,
 )
 from contents.blockchain_service import ContentBlockchainService
-from contents.input_safety import resolve_content_type_from_mime
+from contents.input_safety import (
+    normalize_uploaded_filename,
+    resolve_content_type_from_mime,
+    resolve_upload_mime_type,
+)
 from contents.models import Content, VoteParticipationLog
 from contents.storage import S3StorageService
 from contents.verification_service import ContentVerificationService
@@ -39,7 +43,9 @@ from contents.verification_service import ContentVerificationService
 logger = logging.getLogger(__name__)
 
 
-def _build_async_job_response(job: AIJob, content: Content, request, *, status_code=status.HTTP_202_ACCEPTED):
+def _build_async_job_response(
+    job: AIJob, content: Content, request, *, status_code=status.HTTP_202_ACCEPTED
+):
     return Response(
         {
             "job_id": str(job.public_id),
@@ -48,6 +54,7 @@ def _build_async_job_response(job: AIJob, content: Content, request, *, status_c
         },
         status=status_code,
     )
+
 
 class ContentRegisterView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -75,8 +82,10 @@ class ContentRegisterView(APIView):
             getattr(upload, "content_type", None),
         )
 
-        temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(upload)
-        upload_content_type = getattr(upload, "content_type", "") or "application/octet-stream"
+        temp_path, source_sha256 = ContentRegistrationService.write_temp_file_with_hash(
+            upload
+        )
+        upload_content_type = resolve_upload_mime_type(upload)
         resolved_content_type = resolve_content_type_from_mime(upload_content_type)
         try:
             matching_contents = list(
@@ -87,11 +96,18 @@ class ContentRegisterView(APIView):
             existing_content = matching_contents[0] if matching_contents else None
             if existing_content is not None:
                 existing_job = (
-                    AIJob.objects.filter(content=existing_content, owner=request.user, job_type="register")
+                    AIJob.objects.filter(
+                        content=existing_content,
+                        owner=request.user,
+                        job_type="register",
+                    )
                     .order_by("-created_at")
                     .first()
                 )
-                if existing_job is not None and existing_job.status in {"queued", "running"}:
+                if existing_job is not None and existing_job.status in {
+                    "queued",
+                    "running",
+                }:
                     logger.info(
                         "contents.register.idempotent_reuse user_id=%s content_id=%s job_id=%s source_sha256=%s",
                         getattr(request.user, "id", None),
@@ -99,43 +115,56 @@ class ContentRegisterView(APIView):
                         existing_job.public_id,
                         source_sha256,
                     )
-                    return _build_async_job_response(existing_job, existing_content, request)
+                    return _build_async_job_response(
+                        existing_job, existing_content, request
+                    )
 
-                blocked_duplicate_source = existing_content if existing_job is not None and existing_job.status == "success" else next(
-                    (
-                        item
-                        for item in matching_contents
-                        if (
-                            (
-                                bool((item.blockchain or {}).get("minted"))
-                                and (item.blockchain or {}).get("mint_kind") == "content"
-                            )
-                            or (
-                                bool((item.watermark or {}).get("applied"))
-                                and (
-                                    (item.watermark or {}).get("output_key")
-                                    or (item.watermark or {}).get("output_url")
+                blocked_duplicate_source = (
+                    existing_content
+                    if existing_job is not None and existing_job.status == "success"
+                    else next(
+                        (
+                            item
+                            for item in matching_contents
+                            if (
+                                (
+                                    bool((item.blockchain or {}).get("minted"))
+                                    and (item.blockchain or {}).get("mint_kind")
+                                    == "content"
+                                )
+                                or (
+                                    bool((item.watermark or {}).get("applied"))
+                                    and (
+                                        (item.watermark or {}).get("output_key")
+                                        or (item.watermark or {}).get("output_url")
+                                    )
                                 )
                             )
-                        )
-                    ),
-                    None,
+                        ),
+                        None,
+                    )
                 )
                 if blocked_duplicate_source is not None:
-                    duplicate_content = ContentRegistrationService.create_blocked_duplicate_content(
-                        user=request.user,
-                        upload=upload,
-                        source_sha256=source_sha256,
-                        existing_content=blocked_duplicate_source,
-                        temp_path=temp_path,
+                    duplicate_content = (
+                        ContentRegistrationService.create_blocked_duplicate_content(
+                            user=request.user,
+                            upload=upload,
+                            source_sha256=source_sha256,
+                            existing_content=blocked_duplicate_source,
+                            temp_path=temp_path,
+                        )
                     )
                     duplicate_job = AIJob.objects.create(
                         owner=request.user,
                         content=duplicate_content,
                         job_type="register",
                         status="success",
-                        request_payload={"duplicate_of": str(blocked_duplicate_source.public_id)},
-                        response_payload={"content_public_id": str(duplicate_content.public_id)},
+                        request_payload={
+                            "duplicate_of": str(blocked_duplicate_source.public_id)
+                        },
+                        response_payload={
+                            "content_public_id": str(duplicate_content.public_id)
+                        },
                     )
                     return _build_async_job_response(
                         duplicate_job,
@@ -149,7 +178,9 @@ class ContentRegisterView(APIView):
                 upload=upload,
                 source_sha256=source_sha256,
             )
-            source_input = ContentRegistrationService._build_source_input(content, temp_path=temp_path)
+            source_input = ContentRegistrationService._build_source_input(
+                content, temp_path=temp_path
+            )
         finally:
             temp_path.unlink(missing_ok=True)
 
@@ -202,11 +233,16 @@ class ContentVerifyView(APIView):
             getattr(upload, "content_type", None),
         )
 
-        upload_content_type = getattr(upload, "content_type", "") or "application/octet-stream"
+        upload_content_type = resolve_upload_mime_type(upload)
         resolved_content_type = resolve_content_type_from_mime(upload_content_type)
+        upload_name = normalize_uploaded_filename(
+            getattr(upload, "name", ""), mime_type=upload_content_type
+        )
         temp_path = ContentVerificationService._write_temp_file(upload)
         try:
-            source_input = ContentVerificationService._build_source_input(temp_path=temp_path, upload=upload)
+            source_input = ContentVerificationService._build_source_input(
+                temp_path=temp_path, upload=upload
+            )
         finally:
             temp_path.unlink(missing_ok=True)
 
@@ -215,10 +251,13 @@ class ContentVerifyView(APIView):
             job_type="verify",
             request_payload={
                 "source_input": source_input,
-                "upload_name": upload.name,
+                "upload_name": upload_name,
                 "upload_size": upload.size,
                 "upload_content_type": upload_content_type,
                 "content_type": resolved_content_type,
+                "uploaded_preview_url": source_input.get("url")
+                if resolved_content_type == "image"
+                else None,
             },
         )
         task = run_verify_job.delay(str(job.public_id))
@@ -229,7 +268,7 @@ class ContentVerifyView(APIView):
             getattr(request.user, "id", None),
             job.public_id,
             task.id,
-            upload.name,
+            upload_name,
         )
 
         return Response(
@@ -247,9 +286,13 @@ class ContentWatermarkView(APIView):
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
         watermark = content.watermark or {}
-        if watermark.get("applied") and (watermark.get("output_key") or watermark.get("output_url")):
+        if watermark.get("applied") and (
+            watermark.get("output_key") or watermark.get("output_url")
+        ):
             existing_job = (
-                AIJob.objects.filter(owner=request.user, content=content, job_type="watermark")
+                AIJob.objects.filter(
+                    owner=request.user, content=content, job_type="watermark"
+                )
                 .order_by("-created_at")
                 .first()
             )
@@ -260,10 +303,17 @@ class ContentWatermarkView(APIView):
                     content.public_id,
                     existing_job.public_id,
                 )
-                return _build_async_job_response(existing_job, content, request, status_code=status.HTTP_200_OK)
+                return _build_async_job_response(
+                    existing_job, content, request, status_code=status.HTTP_200_OK
+                )
 
         existing_job = (
-            AIJob.objects.filter(owner=request.user, content=content, job_type="watermark", status__in=["queued", "running"])
+            AIJob.objects.filter(
+                owner=request.user,
+                content=content,
+                job_type="watermark",
+                status__in=["queued", "running"],
+            )
             .order_by("-created_at")
             .first()
         )
@@ -301,20 +351,30 @@ class ContentWatermarkDownloadView(APIView):
     def get(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
         watermark = content.watermark or {}
-        filename = build_watermarked_download_name(content.original_filename, content_type=content.content_type)
-        content_type = "application/pdf" if content.content_type == "document" else (content.mime_type or "application/octet-stream")
+        filename = build_watermarked_download_name(
+            content.original_filename, content_type=content.content_type
+        )
+        content_type = (
+            "application/pdf"
+            if content.content_type == "document"
+            else (content.mime_type or "application/octet-stream")
+        )
 
         output_key = watermark.get("output_key")
         if output_key and S3StorageService.is_enabled():
             client = S3StorageService._get_client()
-            obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=output_key)
+            obj = client.get_object(
+                Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=output_key
+            )
             response = FileResponse(
                 obj["Body"],
                 as_attachment=True,
                 filename=filename,
                 content_type=content_type,
             )
-            response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            response["Content-Disposition"] = (
+                f"attachment; filename*=UTF-8''{quote(filename)}"
+            )
             return response
 
         output_path = watermark.get("output_path")
@@ -325,12 +385,16 @@ class ContentWatermarkDownloadView(APIView):
                 filename=filename,
                 content_type=content_type,
             )
-            response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            response["Content-Disposition"] = (
+                f"attachment; filename*=UTF-8''{quote(filename)}"
+            )
             return response
 
         output_url = watermark.get("output_url")
         if output_url and not str(output_url).startswith(("http://", "https://")):
-            relative_path = str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+            relative_path = (
+                str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+            )
             local_path = Path(settings.MEDIA_ROOT) / relative_path
             if local_path.exists():
                 response = FileResponse(
@@ -339,7 +403,9 @@ class ContentWatermarkDownloadView(APIView):
                     filename=filename,
                     content_type=content_type,
                 )
-                response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+                response["Content-Disposition"] = (
+                    f"attachment; filename*=UTF-8''{quote(filename)}"
+                )
                 return response
 
         raise Http404("워터마크 파일을 찾을 수 없습니다.")
@@ -360,7 +426,10 @@ class ContentMintView(APIView):
             (content.blockchain or {}).get("token_id"),
             (content.blockchain or {}).get("tx_hash"),
         )
-        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+        return Response(
+            ContentSerializer(content, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class ContentReviewVoteStartView(APIView):
@@ -383,7 +452,10 @@ class ContentReviewVoteStartView(APIView):
             (content.blockchain or {}).get("token_id"),
             ((content.blockchain or {}).get("vote") or {}).get("vote_id"),
         )
-        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+        return Response(
+            ContentSerializer(content, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class ContentReviewVoteStatusView(APIView):
@@ -400,17 +472,26 @@ class ContentReviewVoteStatusView(APIView):
             content.public_id,
             ((content.blockchain or {}).get("vote") or {}).get("status"),
         )
-        return Response(ContentSerializer(content, context={"request": request}).data, status=status.HTTP_200_OK)
+        return Response(
+            ContentSerializer(content, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class ContentReviewVoteSigningContextView(APIView):
     permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def get(self, request, public_id):
-        content = get_object_or_404(Content.objects.select_related("owner", "owner__wallet_link"), public_id=public_id)
+        content = get_object_or_404(
+            Content.objects.select_related("owner", "owner__wallet_link"),
+            public_id=public_id,
+        )
         wallet_link = getattr(request.user, "wallet_link", None)
         if wallet_link is None or not wallet_link.address:
-            return Response({"message": "지갑 연결이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"message": "지갑 연결이 필요합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         payload = ContentBlockchainService.get_review_vote_signing_context(
             content=content,
@@ -424,10 +505,16 @@ class ContentReviewVoteCastView(APIView):
     permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
 
     def post(self, request, public_id):
-        content = get_object_or_404(Content.objects.select_related("owner", "owner__wallet_link"), public_id=public_id)
+        content = get_object_or_404(
+            Content.objects.select_related("owner", "owner__wallet_link"),
+            public_id=public_id,
+        )
         wallet_link = getattr(request.user, "wallet_link", None)
         if wallet_link is None or not wallet_link.address:
-            return Response({"message": "지갑 연결이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"message": "지갑 연결이 필요합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = ReviewVoteSignatureSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -446,7 +533,9 @@ class ContentReviewVoteCastView(APIView):
             defaults={
                 "wallet_address": wallet_link.address,
                 "choice": "yes" if serializer.validated_data["is_original"] else "no",
-                "tx_hash": str(receipt.get("tx_hash") or receipt.get("transaction_hash") or ""),
+                "tx_hash": str(
+                    receipt.get("tx_hash") or receipt.get("transaction_hash") or ""
+                ),
                 "token_id": (content.blockchain or {}).get("token_id"),
                 "signed_deadline": serializer.validated_data["deadline"],
             },
@@ -464,7 +553,9 @@ class ContentReviewVoteCastView(APIView):
                 "tx_hash": receipt.get("tx_hash"),
                 "block_number": receipt.get("block_number"),
                 "gas_used": receipt.get("gas_used"),
-                "content": ContentSerializer(content, context={"request": request}).data,
+                "content": ContentSerializer(
+                    content, context={"request": request}
+                ).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -488,12 +579,18 @@ class ContentReviewVoteEventSyncView(APIView):
         try:
             token_id = int(token_id)
         except (TypeError, ValueError):
-            return Response({"message": "token_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"message": "token_id is required."}, status=status.HTTP_400_BAD_REQUEST
+            )
 
-        content = ContentBlockchainService.sync_review_vote_by_token_id(token_id=token_id)
+        content = ContentBlockchainService.sync_review_vote_by_token_id(
+            token_id=token_id
+        )
 
         if content is None:
-            return Response({"message": "content not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"message": "content not found."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         logger.info(
             "contents.review_vote_event_sync.success token_id=%s content_id=%s status=%s",
@@ -516,7 +613,11 @@ class OngoingReviewVoteListView(APIView):
 
     def get(self, request):
         items = []
-        queryset = Content.objects.select_related("owner").filter(decision="review").order_by("-updated_at")[:50]
+        queryset = (
+            Content.objects.select_related("owner")
+            .filter(decision="review")
+            .order_by("-updated_at")[:50]
+        )
 
         for content in queryset:
             if not is_vote_still_open(content):
