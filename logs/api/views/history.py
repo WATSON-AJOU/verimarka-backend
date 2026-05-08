@@ -19,23 +19,53 @@ from logs.api.utils import (
 )
 from logs.models import VerificationHistoryLog
 
+DEFAULT_HISTORY_PAGE_SIZE = 100
+MAX_HISTORY_PAGE_SIZE = 200
+MAX_HISTORY_PAGE = 100
+
+
+def _parse_positive_int(value, default: int, *, maximum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(1, parsed)
+    return min(parsed, maximum) if maximum is not None else parsed
+
 
 class AnalysisHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        page_size = _parse_positive_int(
+            request.query_params.get("page_size") or request.query_params.get("limit"),
+            DEFAULT_HISTORY_PAGE_SIZE,
+            maximum=MAX_HISTORY_PAGE_SIZE,
+        )
+        page = _parse_positive_int(
+            request.query_params.get("page"),
+            1,
+            maximum=MAX_HISTORY_PAGE,
+        )
+        offset = (page - 1) * page_size
+        candidate_limit = offset + page_size
         content_items = []
-        for item in Content.objects.filter(owner=request.user):
+        content_queryset = Content.objects.filter(owner=request.user).order_by(
+            "-created_at"
+        )[:candidate_limit]
+        for item in content_queryset:
             content_items.extend(self._serialize_content(item, request))
         verify_items = [
             self._serialize_verification(item)
-            for item in VerificationHistoryLog.objects.filter(user=request.user)
+            for item in VerificationHistoryLog.objects.filter(
+                user=request.user
+            ).order_by("-created_at")[:candidate_limit]
         ]
         merged = sorted(
             content_items + verify_items,
             key=lambda item: item["sort_key"],
             reverse=True,
-        )
+        )[offset : offset + page_size]
         return Response(
             [
                 {

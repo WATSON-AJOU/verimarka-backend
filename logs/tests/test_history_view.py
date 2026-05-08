@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from contents.models import Content
@@ -172,6 +175,37 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 2)
+
+    def test_history_page_size_limits_merged_payload(self):
+        base_time = timezone.now()
+        contents = [
+            Content.objects.create(
+                owner=self.user,
+                content_type="image",
+                status="allow",
+                decision="allow",
+                original_file="",
+                original_filename=f"history-{index}.png",
+                mime_type="image/png",
+                file_size=123,
+                reason="등록 승인",
+            )
+            for index in range(3)
+        ]
+        for index, content in enumerate(contents):
+            Content.objects.filter(pk=content.pk).update(
+                created_at=base_time + timedelta(minutes=index)
+            )
+
+        response = self.client.get(reverse("analysis_history"), {"page_size": 2})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(
+            [item["file_name"] for item in payload],
+            ["history-2.png", "history-1.png"],
+        )
 
 
 class PublicRecentActivityViewTests(TestCase):
