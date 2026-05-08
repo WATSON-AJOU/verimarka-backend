@@ -1,6 +1,7 @@
 from .base import *  # noqa: F403
 
 DEBUG = False
+SECRET_KEY = "test-secret-key-for-verimarka-jwt-signing"
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 DATABASES = {
