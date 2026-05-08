@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from django.db import connections
 from django.http import JsonResponse
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def health_check(_request):
@@ -13,7 +17,8 @@ def health_check(_request):
         with connections["default"].cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
-    except Exception as exc:  # pragma: no cover - defensive runtime guard
+    except Exception:  # pragma: no cover - defensive runtime guard
+        logger.exception("health.database_check_failed")
         database_status = "error"
         overall_status = "error"
         return JsonResponse(
@@ -22,7 +27,7 @@ def health_check(_request):
                 "service": "verimarka-backend",
                 "database": database_status,
                 "timestamp": timezone.now().isoformat(),
-                "detail": str(exc),
+                "detail": "database check failed",
             },
             status=503,
         )

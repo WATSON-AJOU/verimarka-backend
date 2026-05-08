@@ -5,6 +5,7 @@ from django.core.paginator import EmptyPage, Paginator
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -94,6 +95,42 @@ def _verification_label(user: User) -> str:
 
 def _account_status_label(user: User) -> str:
     return "정상" if user.is_active and not user.is_deleted else "정지"
+
+
+def _is_admin_user(user: User) -> bool:
+    return bool(user.is_staff or user.is_superuser)
+
+
+def _active_admin_count() -> int:
+    return User.objects.filter(
+        Q(is_staff=True) | Q(is_superuser=True),
+        is_active=True,
+        is_deleted=False,
+    ).count()
+
+
+def _admin_update_guard(request, user: User, validated_data: dict) -> Response | None:
+    role = validated_data.get("role")
+    next_is_admin = _is_admin_user(user) if role is None else role == "관리자"
+    status_value = validated_data.get("status")
+    next_is_active = user.is_active if status_value is None else status_value == "정상"
+    removes_admin_access = _is_admin_user(user) and (
+        not next_is_admin or not next_is_active
+    )
+
+    if request.user.pk == user.pk and removes_admin_access:
+        return Response(
+            {"detail": "자기 자신의 관리자 권한 또는 활성 상태는 해제할 수 없습니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if removes_admin_access and _active_admin_count() <= 1:
+        return Response(
+            {"detail": "마지막 활성 관리자 계정은 변경할 수 없습니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return None
 
 
 def _user_nft_count(user: User) -> int | None:
@@ -671,6 +708,9 @@ class AdminUserDetailView(APIView):
         user = get_object_or_404(User.objects.select_related("wallet_link"), pk=user_id)
         serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        guard_response = _admin_update_guard(request, user, serializer.validated_data)
+        if guard_response is not None:
+            return guard_response
         serializer.update(user, serializer.validated_data)
         payload = _serialize_user_detail(user, request)
         return Response(AdminUserDetailSerializer(payload).data)
