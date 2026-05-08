@@ -39,11 +39,23 @@ AI 생성물이 빠르게 늘어나면서 원본성, 소유권, 등록 가능성
 
 ## 5. 아키텍처와 운영 화면
 
-| 구분 | 이미지 | 설명 |
-| --- | --- | --- |
-| 전체 시스템 | <img src="image/system-architect.png" width="360" alt="전체 시스템 아키텍처"> | 사용자/관리자 프론트, Django API, AI, 블록체인, 운영 인프라의 연결 구조입니다. |
-| 백엔드 구조 | <img src="image/backend.png" width="360" alt="백엔드 구조"> | 인증, 콘텐츠, 분석, 지갑, 로그, 배포 구성의 백엔드 내부 책임을 나눈 구조입니다. |
-| Sentry/Slack | <img src="image/sentry_image.png" width="360" alt="Sentry Slack 연동"> | 운영 오류를 Sentry에서 수집하고 Slack으로 알림을 전달하는 관측 흐름입니다. |
+### 전체 시스템 아키텍처
+
+<img src="image/system-architect.png" width="820" alt="전체 시스템 아키텍처">
+
+사용자/관리자 프론트, Django API, AI, 블록체인, 운영 인프라의 연결 구조입니다.
+
+### 백엔드 구조
+
+<img src="image/backend.png" width="820" alt="백엔드 구조">
+
+인증, 콘텐츠, 분석, 지갑, 로그, 배포 구성의 백엔드 내부 책임을 나눈 구조입니다.
+
+### Sentry/Slack 연동
+
+<img src="image/sentry_image.png" width="820" alt="Sentry Slack 연동">
+
+운영 오류를 Sentry에서 수집하고 Slack으로 알림을 전달하는 관측 흐름입니다.
 
 ## 6. 역할 분담
 
