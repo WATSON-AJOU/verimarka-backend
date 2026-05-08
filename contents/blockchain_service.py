@@ -12,13 +12,15 @@ from urllib.request import urlopen
 from django.conf import settings
 from django.utils import timezone
 
+from accounts.services.email_service import (
+    EmailSendError,
+    send_review_vote_result_email,
+)
 from analysis.api.services import AIIntegrationError
-from accounts.services.email_service import EmailSendError, send_review_vote_result_email
 from config.sentry import capture_sentry_message
 
 from .models import Content
 from .storage import S3StorageService
-
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,9 @@ class ContentBlockchainService:
             and existing_blockchain.get("minted")
             and existing_blockchain.get("tx_hash")
         ):
-            if existing_blockchain.get("token_id") and cls._normalize_owner_address(existing_blockchain.get("owner_address")):
+            if existing_blockchain.get("token_id") and cls._normalize_owner_address(
+                existing_blockchain.get("owner_address")
+            ):
                 previous_blockchain = cls._json_safe(existing_blockchain)
                 content = cls._ensure_vector_upserted(content=content)
                 if content.blockchain != previous_blockchain:
@@ -71,7 +75,9 @@ class ContentBlockchainService:
                 return content
 
             blockchain = cls._create_client()
-            recipient_address = cls._resolve_recipient_address(blockchain, content=content)
+            recipient_address = cls._resolve_recipient_address(
+                blockchain, content=content
+            )
             wm_id = existing_blockchain.get("wm_id") or cls._resolve_wm_id(content)
             verification = cls._load_verification_snapshot(
                 blockchain=blockchain,
@@ -89,8 +95,13 @@ class ContentBlockchainService:
                         "tx_hash": existing_blockchain.get("tx_hash"),
                         "previous_token_id": existing_blockchain.get("token_id"),
                         "resolved_token_id": verification.get("token_id"),
-                        "previous_owner_address": existing_blockchain.get("owner_address"),
-                        "resolved_owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
+                        "previous_owner_address": existing_blockchain.get(
+                            "owner_address"
+                        ),
+                        "resolved_owner_address": cls._normalize_owner_address(
+                            verification.get("owner")
+                        )
+                        or recipient_address,
                     },
                 )
                 token_info = blockchain.get_document_info(verification["token_id"])
@@ -99,23 +110,33 @@ class ContentBlockchainService:
                     **existing_blockchain,
                     "minted": True,
                     "mint_kind": "content",
-                    "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
+                    "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(
+                        chain_id, f"Chain {chain_id}" if chain_id else "Unknown"
+                    ),
                     "chain_id": chain_id,
                     "contract_address": getattr(blockchain, "contract_address", ""),
                     "recipient_address": recipient_address,
-                    "owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
+                    "owner_address": cls._normalize_owner_address(
+                        verification.get("owner")
+                    )
+                    or recipient_address,
                     "wm_id": wm_id,
                     "token_id": verification.get("token_id"),
-                    "status": verification.get("status") or existing_blockchain.get("status") or "Approved",
-                    "verification_link": verification.get("verification_link") or existing_blockchain.get("verification_link"),
+                    "status": verification.get("status")
+                    or existing_blockchain.get("status")
+                    or "Approved",
+                    "verification_link": verification.get("verification_link")
+                    or existing_blockchain.get("verification_link"),
                     "author_name": verification.get("author_name")
                     or existing_blockchain.get("author_name")
                     or cls._resolve_author_name(content),
                     "file_name": verification.get("file_name")
                     or existing_blockchain.get("file_name")
                     or cls._resolve_file_name(content),
-                    "token_uri": existing_blockchain.get("token_uri") or cls._build_token_uri(content),
-                    "minted_at": existing_blockchain.get("minted_at") or timezone.now().isoformat(),
+                    "token_uri": existing_blockchain.get("token_uri")
+                    or cls._build_token_uri(content),
+                    "minted_at": existing_blockchain.get("minted_at")
+                    or timezone.now().isoformat(),
                     "minted_at_display": existing_blockchain.get("minted_at_display")
                     or timezone.localtime(timezone.now()).strftime("%Y.%m.%d %H:%M"),
                     "document": cls._json_safe(token_info or {}),
@@ -161,13 +182,12 @@ class ContentBlockchainService:
                 else None
             )
         except Exception as exc:
-            raise AIIntegrationError(
-                error_code="BLOCKCHAIN_MINT_FAIL",
-                error_message=str(exc) or "NFT 토큰 발행에 실패했습니다.",
-                retryable=True,
-                status_code=500,
+            cls._raise_blockchain_operation_error(
+                exc,
+                fallback_code="BLOCKCHAIN_MINT_FAIL",
+                fallback_message="NFT 토큰 발행에 실패했습니다.",
                 job_id=str(content.public_id),
-            ) from exc
+            )
 
         chain_id = getattr(blockchain, "chain_id", None)
         minted_at = timezone.now()
@@ -181,11 +201,14 @@ class ContentBlockchainService:
             **existing_blockchain,
             "minted": True,
             "mint_kind": "content",
-            "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
+            "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(
+                chain_id, f"Chain {chain_id}" if chain_id else "Unknown"
+            ),
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
             "recipient_address": recipient_address,
-            "owner_address": cls._normalize_owner_address(verification.get("owner")) or recipient_address,
+            "owner_address": cls._normalize_owner_address(verification.get("owner"))
+            or recipient_address,
             "wm_id": wm_id,
             "token_id": verification.get("token_id"),
             "status": verification.get("status") or "Approved",
@@ -198,7 +221,9 @@ class ContentBlockchainService:
             "block_number": receipt.get("block_number"),
             "gas_used": receipt.get("gas_used"),
             "minted_at": minted_at.isoformat(),
-            "minted_at_display": timezone.localtime(minted_at).strftime("%Y.%m.%d %H:%M"),
+            "minted_at_display": timezone.localtime(minted_at).strftime(
+                "%Y.%m.%d %H:%M"
+            ),
             "model_name": watermark.get("model") or "WAM",
             "model_version": watermark.get("model_version") or "v2.1.0",
             "document": cls._json_safe(token_info or {}),
@@ -208,7 +233,9 @@ class ContentBlockchainService:
         return content
 
     @classmethod
-    def start_review_vote(cls, *, content: Content, notify_by_email: bool = False) -> Content:
+    def start_review_vote(
+        cls, *, content: Content, notify_by_email: bool = False
+    ) -> Content:
         if content.decision != "review":
             raise AIIntegrationError(
                 error_code="INVALID_STATE",
@@ -220,7 +247,9 @@ class ContentBlockchainService:
 
         existing_blockchain = content.blockchain or {}
         existing_vote = existing_blockchain.get("vote") or {}
-        if existing_blockchain.get("mint_kind") == "review_vote" and existing_blockchain.get("token_id"):
+        if existing_blockchain.get(
+            "mint_kind"
+        ) == "review_vote" and existing_blockchain.get("token_id"):
             if bool(existing_vote.get("notify_by_email")) != bool(notify_by_email):
                 content.blockchain = {
                     **existing_blockchain,
@@ -279,13 +308,12 @@ class ContentBlockchainService:
                 is_suspicious=True,
             )
         except Exception as exc:
-            raise AIIntegrationError(
-                error_code="BLOCKCHAIN_VOTE_START_FAIL",
-                error_message=str(exc) or "커뮤니티 검증 투표 생성에 실패했습니다.",
-                retryable=True,
-                status_code=500,
+            cls._raise_blockchain_operation_error(
+                exc,
+                fallback_code="BLOCKCHAIN_VOTE_START_FAIL",
+                fallback_message="커뮤니티 검증 투표 생성에 실패했습니다.",
                 job_id=str(content.public_id),
-            ) from exc
+            )
 
         content.blockchain = {
             **existing_blockchain,
@@ -311,14 +339,18 @@ class ContentBlockchainService:
         }
         content.status = "review"
         content.next_action = "start_vote"
-        content.save(update_fields=["blockchain", "status", "next_action", "updated_at"])
+        content.save(
+            update_fields=["blockchain", "status", "next_action", "updated_at"]
+        )
         return cls.sync_review_vote(content=content)
 
     @classmethod
     def sync_review_vote(cls, *, content: Content) -> Content:
         blockchain_data = content.blockchain or {}
         previous_vote_data = blockchain_data.get("vote") or {}
-        previous_status_name = (previous_vote_data.get("status") or "").strip() or "Pending"
+        previous_status_name = (
+            previous_vote_data.get("status") or ""
+        ).strip() or "Pending"
         if blockchain_data.get("mint_kind") != "review_vote":
             raise AIIntegrationError(
                 error_code="INVALID_STATE",
@@ -335,7 +367,8 @@ class ContentBlockchainService:
             verification = cls._load_verification_snapshot(
                 blockchain=blockchain,
                 wm_id=wm_id,
-                expected_owner=blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain, content=content),
+                expected_owner=blockchain_data.get("recipient_address")
+                or cls._resolve_recipient_address(blockchain, content=content),
                 expected_status="Pending",
             )
             if not verification.get("exists") or not verification.get("token_id"):
@@ -350,37 +383,57 @@ class ContentBlockchainService:
             token_id = verification["token_id"]
             token_info = blockchain.get_document_info(token_id)
             end_time = token_info.get("end_time") or 0
-            status_name = token_info.get("status") or verification.get("status") or "Pending"
+            status_name = (
+                token_info.get("status") or verification.get("status") or "Pending"
+            )
 
-            if status_name == "Pending" and end_time and end_time <= int(timezone.now().timestamp()):
+            if (
+                status_name == "Pending"
+                and end_time
+                and end_time <= int(timezone.now().timestamp())
+            ):
                 blockchain.finalize_status(token_id)
                 verification = blockchain.verify_document(wm_id)
                 token_info = blockchain.get_document_info(token_id)
-                status_name = token_info.get("status") or verification.get("status") or "Pending"
+                status_name = (
+                    token_info.get("status") or verification.get("status") or "Pending"
+                )
         except AIIntegrationError:
             raise
         except Exception as exc:
-            raise AIIntegrationError(
-                error_code="BLOCKCHAIN_VOTE_SYNC_FAIL",
-                error_message=str(exc) or "커뮤니티 검증 상태를 동기화하지 못했습니다.",
-                retryable=True,
-                status_code=500,
+            cls._raise_blockchain_operation_error(
+                exc,
+                fallback_code="BLOCKCHAIN_VOTE_SYNC_FAIL",
+                fallback_message="커뮤니티 검증 상태를 동기화하지 못했습니다.",
                 job_id=str(content.public_id),
-            ) from exc
+            )
 
         chain_id = getattr(blockchain, "chain_id", None)
         now = timezone.now()
-        vote_payload = cls._build_vote_payload(content=content, token_id=token_id, status_name=status_name, token_info=token_info)
-        minted_at_display = blockchain_data.get("minted_at_display") or timezone.localtime(now).strftime("%Y.%m.%d %H:%M")
+        vote_payload = cls._build_vote_payload(
+            content=content,
+            token_id=token_id,
+            status_name=status_name,
+            token_info=token_info,
+        )
+        minted_at_display = blockchain_data.get(
+            "minted_at_display"
+        ) or timezone.localtime(now).strftime("%Y.%m.%d %H:%M")
         notify_by_email = bool(previous_vote_data.get("notify_by_email"))
-        email_notification_sent = bool(previous_vote_data.get("email_notification_sent"))
-        email_notification_error = previous_vote_data.get("email_notification_error") or ""
+        email_notification_sent = bool(
+            previous_vote_data.get("email_notification_sent")
+        )
+        email_notification_error = (
+            previous_vote_data.get("email_notification_error") or ""
+        )
 
         if notify_by_email:
             vote_payload["notify_by_email"] = True
         if email_notification_sent:
             vote_payload["email_notification_sent"] = True
-            vote_payload["email_notification_sent_at"] = previous_vote_data.get("email_notification_sent_at")
+            vote_payload["email_notification_sent_at"] = previous_vote_data.get(
+                "email_notification_sent_at"
+            )
         if email_notification_error:
             vote_payload["email_notification_error"] = email_notification_error
 
@@ -388,19 +441,27 @@ class ContentBlockchainService:
             **blockchain_data,
             "minted": True,
             "mint_kind": "review_vote",
-            "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(chain_id, f"Chain {chain_id}" if chain_id else "Unknown"),
+            "network_name": cls.NETWORK_NAME_BY_CHAIN_ID.get(
+                chain_id, f"Chain {chain_id}" if chain_id else "Unknown"
+            ),
             "chain_id": chain_id,
             "contract_address": getattr(blockchain, "contract_address", ""),
-            "recipient_address": blockchain_data.get("recipient_address") or cls._resolve_recipient_address(blockchain, content=content),
+            "recipient_address": blockchain_data.get("recipient_address")
+            or cls._resolve_recipient_address(blockchain, content=content),
             "owner_address": cls._normalize_owner_address(verification.get("owner"))
             or blockchain_data.get("owner_address"),
             "wm_id": wm_id,
             "token_id": token_id,
             "status": verification.get("status") or status_name,
             "verification_link": verification.get("verification_link"),
-            "author_name": verification.get("author_name") or blockchain_data.get("author_name"),
-            "file_name": verification.get("file_name") or token_info.get("file_name") or blockchain_data.get("file_name") or cls._resolve_file_name(content),
-            "token_uri": blockchain_data.get("token_uri") or cls._build_token_uri(content),
+            "author_name": verification.get("author_name")
+            or blockchain_data.get("author_name"),
+            "file_name": verification.get("file_name")
+            or token_info.get("file_name")
+            or blockchain_data.get("file_name")
+            or cls._resolve_file_name(content),
+            "token_uri": blockchain_data.get("token_uri")
+            or cls._build_token_uri(content),
             "minted_at": blockchain_data.get("minted_at") or now.isoformat(),
             "minted_at_display": minted_at_display,
             "document": cls._json_safe(token_info or {}),
@@ -457,7 +518,9 @@ class ContentBlockchainService:
         return cls.sync_review_vote(content=content)
 
     @classmethod
-    def get_review_vote_signing_context(cls, *, content: Content, voter_address: str) -> dict[str, Any]:
+    def get_review_vote_signing_context(
+        cls, *, content: Content, voter_address: str
+    ) -> dict[str, Any]:
         blockchain_data = content.blockchain or {}
         if blockchain_data.get("mint_kind") != "review_vote":
             raise AIIntegrationError(
@@ -491,7 +554,9 @@ class ContentBlockchainService:
             )
 
         blockchain = cls._create_client()
-        deadline = int(timezone.now().timestamp()) + cls.REVIEW_VOTE_SIGNATURE_TTL_SECONDS
+        deadline = (
+            int(timezone.now().timestamp()) + cls.REVIEW_VOTE_SIGNATURE_TTL_SECONDS
+        )
         nonce = int(blockchain.get_vote_nonce(voter_address))
         domain = cls._json_safe(blockchain.get_eip712_domain())
         token_id_int = int(token_id)
@@ -567,16 +632,161 @@ class ContentBlockchainService:
                 signature=signature_bytes,
             )
         except Exception as exc:
-            raise AIIntegrationError(
-                error_code="BLOCKCHAIN_VOTE_CAST_FAIL",
-                error_message=str(exc) or "서명 기반 투표 처리에 실패했습니다.",
-                retryable=True,
-                status_code=400,
+            cls._raise_blockchain_operation_error(
+                exc,
+                fallback_code="BLOCKCHAIN_VOTE_CAST_FAIL",
+                fallback_message="서명 기반 투표 처리에 실패했습니다.",
                 job_id=str(content.public_id),
-            ) from exc
+                fallback_status_code=400,
+            )
 
         synced_content = cls.sync_review_vote(content=content)
         return synced_content, receipt
+
+    @classmethod
+    def _raise_blockchain_operation_error(
+        cls,
+        exc: Exception,
+        *,
+        fallback_code: str,
+        fallback_message: str,
+        job_id: str | None = None,
+        fallback_status_code: int = 500,
+    ) -> None:
+        error_code, error_message, retryable, status_code = (
+            cls._classify_blockchain_error(
+                exc,
+                fallback_code=fallback_code,
+                fallback_message=fallback_message,
+                fallback_status_code=fallback_status_code,
+            )
+        )
+        raise AIIntegrationError(
+            error_code=error_code,
+            error_message=error_message,
+            retryable=retryable,
+            status_code=status_code,
+            job_id=job_id,
+        ) from exc
+
+    @classmethod
+    def _classify_blockchain_error(
+        cls,
+        exc: Exception,
+        *,
+        fallback_code: str,
+        fallback_message: str,
+        fallback_status_code: int,
+    ) -> tuple[str, str, bool, int]:
+        raw_message = str(exc).strip()
+        normalized = raw_message.lower()
+
+        if any(
+            token in normalized
+            for token in ("timeout", "timed out", "read timed", "connect timed")
+        ):
+            return (
+                "BLOCKCHAIN_RPC_TIMEOUT",
+                "블록체인 네트워크 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.",
+                True,
+                503,
+            )
+
+        if any(
+            token in normalized
+            for token in (
+                "connection refused",
+                "connection reset",
+                "temporarily unavailable",
+                "bad gateway",
+                "gateway timeout",
+            )
+        ):
+            return (
+                "BLOCKCHAIN_RPC_UNAVAILABLE",
+                "블록체인 네트워크에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                True,
+                503,
+            )
+
+        if any(
+            token in normalized
+            for token in (
+                "replacement transaction underpriced",
+                "nonce too low",
+                "already known",
+                "transaction underpriced",
+            )
+        ):
+            return (
+                "BLOCKCHAIN_TRANSACTION_PENDING",
+                "이전 트랜잭션이 아직 처리 중입니다. 잠시 후 다시 확인해주세요.",
+                True,
+                409,
+            )
+
+        if any(
+            token in normalized
+            for token in (
+                "insufficient funds",
+                "exceeds allowance",
+                "gas required exceeds allowance",
+            )
+        ):
+            return (
+                "BLOCKCHAIN_TRANSACTION_FUNDS_REQUIRED",
+                "트랜잭션을 처리할 수 있는 수수료 잔액이 부족합니다.",
+                False,
+                400,
+            )
+
+        if any(
+            token in normalized
+            for token in ("execution reverted", "contractlogicerror", "revert")
+        ):
+            if "already voted" in normalized:
+                return (
+                    "BLOCKCHAIN_VOTE_ALREADY_CAST",
+                    "이미 이 투표에 참여했습니다.",
+                    False,
+                    409,
+                )
+            if "voting time ended" in normalized or "signature expired" in normalized:
+                return (
+                    "BLOCKCHAIN_VOTE_CLOSED",
+                    "투표가 종료되었거나 서명이 만료되었습니다. 상태를 새로고침한 뒤 확인해주세요.",
+                    False,
+                    400,
+                )
+            if "voting not active" in normalized:
+                return (
+                    "BLOCKCHAIN_VOTE_NOT_ACTIVE",
+                    "현재 진행 중인 투표가 아닙니다.",
+                    False,
+                    400,
+                )
+            if "invalid signature" in normalized:
+                return (
+                    "BLOCKCHAIN_INVALID_SIGNATURE",
+                    "지갑 서명 검증에 실패했습니다. 다시 시도해주세요.",
+                    False,
+                    400,
+                )
+            return (
+                "BLOCKCHAIN_CONTRACT_REVERTED",
+                "블록체인 계약에서 요청을 처리하지 못했습니다. 상태를 새로고침한 뒤 다시 시도해주세요.",
+                False,
+                400,
+            )
+
+        return (
+            fallback_code,
+            raw_message
+            if raw_message and len(raw_message) <= 140
+            else fallback_message,
+            True,
+            fallback_status_code,
+        )
 
     @classmethod
     def _create_client(cls):
@@ -617,7 +827,9 @@ class ContentBlockchainService:
         if integration_root_str not in sys.path:
             sys.path.insert(0, integration_root_str)
 
-        spec = importlib.util.spec_from_file_location("verimarka_blockchain_module", blockchain_path)
+        spec = importlib.util.spec_from_file_location(
+            "verimarka_blockchain_module", blockchain_path
+        )
         if spec is None or spec.loader is None:
             raise AIIntegrationError(
                 error_code="BLOCKCHAIN_MODULE_LOAD_FAIL",
@@ -680,7 +892,9 @@ class ContentBlockchainService:
             input_payload["s3_key"] = output_key
             if S3StorageService.is_enabled():
                 input_payload["s3_uri"] = S3StorageService.build_s3_uri(key=output_key)
-                input_payload["url"] = S3StorageService.generate_presigned_get_url(key=output_key)
+                input_payload["url"] = S3StorageService.generate_presigned_get_url(
+                    key=output_key
+                )
         elif output_path and Path(output_path).exists():
             input_payload["local_path"] = output_path
         elif output_url:
@@ -717,7 +931,8 @@ class ContentBlockchainService:
         if not payload.get("success"):
             raise AIIntegrationError(
                 error_code="VECTOR_UPSERT_FAIL",
-                error_message=payload.get("reason") or "pgvector upsert에 실패했습니다.",
+                error_message=payload.get("reason")
+                or "pgvector upsert에 실패했습니다.",
                 retryable=True,
                 status_code=500,
                 job_id=str(content.public_id),
@@ -740,7 +955,9 @@ class ContentBlockchainService:
                 status_code=500,
             )
 
-        spec = importlib.util.spec_from_file_location("verimarka_persist_module", persist_path)
+        spec = importlib.util.spec_from_file_location(
+            "verimarka_persist_module", persist_path
+        )
         if spec is None or spec.loader is None:
             raise AIIntegrationError(
                 error_code="AI_MODULE_LOAD_FAIL",
@@ -843,11 +1060,15 @@ class ContentBlockchainService:
 
         if output_key and S3StorageService.is_enabled():
             client = S3StorageService._get_client()
-            obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=output_key)
+            obj = client.get_object(
+                Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=output_key
+            )
             return obj["Body"].read()
 
         if output_url and not str(output_url).startswith(("http://", "https://")):
-            relative_path = str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+            relative_path = (
+                str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+            )
             local_path = Path(settings.MEDIA_ROOT) / relative_path
             if local_path.exists():
                 return local_path.read_bytes()
@@ -886,7 +1107,10 @@ class ContentBlockchainService:
     def _load_original_bytes(cls, content: Content) -> bytes:
         if content.original_storage_key and S3StorageService.is_enabled():
             client = S3StorageService._get_client()
-            obj = client.get_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=content.original_storage_key)
+            obj = client.get_object(
+                Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+                Key=content.original_storage_key,
+            )
             return obj["Body"].read()
 
         if content.original_file and Path(content.original_file.path).exists():
@@ -998,7 +1222,8 @@ class ContentBlockchainService:
         )
         return {
             **verification,
-            "owner": cls._normalize_owner_address(verification.get("owner")) or expected_owner,
+            "owner": cls._normalize_owner_address(verification.get("owner"))
+            or expected_owner,
             "status": verification.get("status") or expected_status,
         }
 
@@ -1061,13 +1286,24 @@ class ContentBlockchainService:
         )
 
     @classmethod
-    def _build_vote_payload(cls, *, content: Content, token_id: int, status_name: str, token_info: dict[str, Any]) -> dict[str, Any]:
+    def _build_vote_payload(
+        cls,
+        *,
+        content: Content,
+        token_id: int,
+        status_name: str,
+        token_info: dict[str, Any],
+    ) -> dict[str, Any]:
         upvotes = int(token_info.get("upvotes") or 0)
         downvotes = int(token_info.get("downvotes") or 0)
         started_at = cls._from_unix(token_info.get("timestamp"))
         end_time = cls._from_unix(token_info.get("end_time"))
-        finalized_at = timezone.now() if status_name in {"Approved", "Rejected"} else None
-        top_cosine = content.top_cosine if isinstance(content.top_cosine, (float, int)) else None
+        finalized_at = (
+            timezone.now() if status_name in {"Approved", "Rejected"} else None
+        )
+        top_cosine = (
+            content.top_cosine if isinstance(content.top_cosine, (float, int)) else None
+        )
         threshold = cls.REVIEW_THRESHOLD
         return {
             "active": status_name == "Pending",
@@ -1082,9 +1318,13 @@ class ContentBlockchainService:
             "end_time_display": cls._format_dt(end_time),
             "finalized_at": finalized_at.isoformat() if finalized_at else None,
             "finalized_at_display": cls._format_dt(finalized_at),
-            "similarity_percent": round(float(top_cosine) * 100, 1) if top_cosine is not None else None,
+            "similarity_percent": round(float(top_cosine) * 100, 1)
+            if top_cosine is not None
+            else None,
             "threshold": threshold,
-            "delta": round(float(top_cosine) - threshold, 4) if top_cosine is not None else None,
+            "delta": round(float(top_cosine) - threshold, 4)
+            if top_cosine is not None
+            else None,
         }
 
     @classmethod
@@ -1108,7 +1348,9 @@ class ContentBlockchainService:
             return output_url
 
         if output_url:
-            base_url = getattr(settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com").rstrip("/")
+            base_url = getattr(
+                settings, "VERIMARKA_PUBLIC_BASE_URL", "https://verimarka.com"
+            ).rstrip("/")
             return f"{base_url}{output_url}"
 
         return f"{getattr(settings, 'VERIMARKA_PUBLIC_BASE_URL', 'https://verimarka.com').rstrip('/')}/history"

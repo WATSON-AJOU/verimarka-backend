@@ -31,8 +31,6 @@ AI 생성물이 빠르게 늘어나면서 원본성, 소유권, 등록 가능성
 ## 전체구조
 ![](./image/backend.png)
 
-![](./image/system-architect.png)
-
 ## 4. 기술 스택
 
 - Backend: Django, Django REST Framework, Simple JWT
@@ -43,7 +41,7 @@ AI 생성물이 빠르게 늘어나면서 원본성, 소유권, 등록 가능성
 - Observability: Django logging, Sentry, Slack 알림, request id 추적
 - Quality: Ruff, pre-commit, GitHub Actions
 
-## 5. 시스템 아키텍처 그림
+## 5. 시스템 아키텍처 
 
 ```mermaid
 flowchart LR

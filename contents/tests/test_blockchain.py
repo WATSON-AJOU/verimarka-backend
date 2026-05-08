@@ -9,7 +9,6 @@ from contents.blockchain_service import ContentBlockchainService
 from contents.models import Content
 from wallets.models import WalletLink
 
-
 User = get_user_model()
 
 
@@ -36,17 +35,34 @@ class ContentBlockchainFilenameTests(TestCase):
             content_type="image",
             status=status,
             decision=decision,
-            original_file=SimpleUploadedFile(filename, b"fake-image-bytes", content_type="image/png"),
+            original_file=SimpleUploadedFile(
+                filename, b"fake-image-bytes", content_type="image/png"
+            ),
             original_filename=filename,
             mime_type="image/png",
             file_size=16,
-            watermark={"applied": True, "payload_id": 4242, "model": "wam", "model_version": "v2"},
+            watermark={
+                "applied": True,
+                "payload_id": 4242,
+                "model": "wam",
+                "model_version": "v2",
+            },
         )
 
-    @patch.object(ContentBlockchainService, "_ensure_vector_upserted", side_effect=lambda *, content: content)
-    @patch.object(ContentBlockchainService, "_load_watermarked_bytes", return_value=b"watermarked-bytes")
+    @patch.object(
+        ContentBlockchainService,
+        "_ensure_vector_upserted",
+        side_effect=lambda *, content: content,
+    )
+    @patch.object(
+        ContentBlockchainService,
+        "_load_watermarked_bytes",
+        return_value=b"watermarked-bytes",
+    )
     @patch.object(ContentBlockchainService, "_create_client")
-    def test_mint_passes_and_persists_file_name(self, mocked_create_client, _mocked_load_bytes, _mocked_upsert):
+    def test_mint_passes_and_persists_file_name(
+        self, mocked_create_client, _mocked_load_bytes, _mocked_upsert
+    ):
         blockchain = Mock()
         blockchain.chain_id = 11155111
         blockchain.contract_address = "0xabc"
@@ -78,16 +94,24 @@ class ContentBlockchainFilenameTests(TestCase):
         }
         mocked_create_client.return_value = blockchain
 
-        content = self._create_content(decision="allow", status="allow", filename="origin-name.png")
+        content = self._create_content(
+            decision="allow", status="allow", filename="origin-name.png"
+        )
         updated = ContentBlockchainService.mint(content=content)
 
         blockchain.mint_document_with_metadata.assert_called_once()
         self.assertEqual(updated.blockchain["file_name"], "minted-name.png")
         self.assertEqual(updated.blockchain["document"]["file_name"], "minted-name.png")
 
-    @patch.object(ContentBlockchainService, "_ensure_vector_upserted", side_effect=lambda *, content: content)
+    @patch.object(
+        ContentBlockchainService,
+        "_ensure_vector_upserted",
+        side_effect=lambda *, content: content,
+    )
     @patch.object(ContentBlockchainService, "_create_client")
-    def test_mint_repairs_existing_broken_mint_record_without_reminting(self, mocked_create_client, _mocked_upsert):
+    def test_mint_repairs_existing_broken_mint_record_without_reminting(
+        self, mocked_create_client, _mocked_upsert
+    ):
         blockchain = Mock()
         blockchain.chain_id = 137
         blockchain.contract_address = "0xabc"
@@ -113,7 +137,9 @@ class ContentBlockchainFilenameTests(TestCase):
         }
         mocked_create_client.return_value = blockchain
 
-        content = self._create_content(decision="allow", status="allow", filename="broken-name.png")
+        content = self._create_content(
+            decision="allow", status="allow", filename="broken-name.png"
+        )
         content.blockchain = {
             "minted": True,
             "mint_kind": "content",
@@ -135,7 +161,9 @@ class ContentBlockchainFilenameTests(TestCase):
         mocked_response.read.return_value = b"remote-watermarked-bytes"
         mocked_urlopen.return_value.__enter__.return_value = mocked_response
 
-        content = self._create_content(decision="allow", status="allow", filename="origin-name.png")
+        content = self._create_content(
+            decision="allow", status="allow", filename="origin-name.png"
+        )
         content.watermark = {
             "applied": True,
             "payload_id": 4242,
@@ -145,4 +173,39 @@ class ContentBlockchainFilenameTests(TestCase):
         result = ContentBlockchainService._load_watermarked_bytes(content)
 
         self.assertEqual(result, b"remote-watermarked-bytes")
-        mocked_urlopen.assert_called_once_with("https://example.com/watermarked.png", timeout=10)
+        mocked_urlopen.assert_called_once_with(
+            "https://example.com/watermarked.png", timeout=10
+        )
+
+    def test_classify_blockchain_timeout_hides_raw_rpc_message(self):
+        error_code, error_message, retryable, status_code = (
+            ContentBlockchainService._classify_blockchain_error(
+                TimeoutError("HTTPConnectionPool read timed out after 30 seconds"),
+                fallback_code="BLOCKCHAIN_MINT_FAIL",
+                fallback_message="NFT 토큰 발행에 실패했습니다.",
+                fallback_status_code=500,
+            )
+        )
+
+        self.assertEqual(error_code, "BLOCKCHAIN_RPC_TIMEOUT")
+        self.assertEqual(
+            error_message,
+            "블록체인 네트워크 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.",
+        )
+        self.assertTrue(retryable)
+        self.assertEqual(status_code, 503)
+
+    def test_classify_blockchain_vote_revert_to_user_message(self):
+        error_code, error_message, retryable, status_code = (
+            ContentBlockchainService._classify_blockchain_error(
+                RuntimeError("execution reverted: Already voted"),
+                fallback_code="BLOCKCHAIN_VOTE_CAST_FAIL",
+                fallback_message="서명 기반 투표 처리에 실패했습니다.",
+                fallback_status_code=400,
+            )
+        )
+
+        self.assertEqual(error_code, "BLOCKCHAIN_VOTE_ALREADY_CAST")
+        self.assertEqual(error_message, "이미 이 투표에 참여했습니다.")
+        self.assertFalse(retryable)
+        self.assertEqual(status_code, 409)
