@@ -1,5 +1,7 @@
 db.sqlite3
 
+.DS_Store
+
 .venv/
 .venv/*
 
@@ -7,6 +9,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.ruff_cache/
 .env.dev
 .env.prod
 .env.proddocker
