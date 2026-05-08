@@ -35,6 +35,17 @@ MIME_TYPE_BY_EXTENSION = {
     for mime_type, extensions in ALLOWED_UPLOAD_MIME_TYPES.items()
     for ext in extensions
 }
+FILE_SIGNATURES = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "application/pdf": (b"%PDF-",),
+    "application/msword": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
+        b"PK\x03\x04",
+        b"PK\x05\x06",
+        b"PK\x07\x08",
+    ),
+}
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MULTISPACE_RE = re.compile(r"\s+")
 _SAFE_FILE_STEM_RE = re.compile(r"[^0-9A-Za-z가-힣._()\- ]+")
@@ -88,6 +99,29 @@ def sanitize_uploaded_filename(name: str, *, mime_type: str | None = None) -> st
     return f"{safe_stem}{extension}"
 
 
+def validate_file_signature(upload, mime_type: str) -> None:
+    signatures = FILE_SIGNATURES.get(mime_type)
+    if not signatures:
+        return
+
+    max_length = max(len(signature) for signature in signatures)
+    try:
+        position = upload.tell()
+    except (AttributeError, OSError):
+        position = None
+
+    try:
+        header = upload.read(max_length)
+    finally:
+        try:
+            upload.seek(position or 0)
+        except (AttributeError, OSError):
+            pass
+
+    if not any(header.startswith(signature) for signature in signatures):
+        raise serializers.ValidationError("파일 내용과 형식이 일치하지 않습니다.")
+
+
 def validate_uploaded_image_file(upload):
     mime_type = (getattr(upload, "content_type", "") or "").lower()
     if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
@@ -100,6 +134,7 @@ def validate_uploaded_image_file(upload):
         raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
 
     normalize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
+    validate_file_signature(upload, mime_type)
     return upload
 
 
@@ -120,6 +155,8 @@ def validate_uploaded_content_file(upload):
     if file_size > MAX_IMAGE_BYTES:
         raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
 
+    resolved_mime_type = resolve_upload_mime_type(upload)
+    validate_file_signature(upload, resolved_mime_type)
     return upload
 
 

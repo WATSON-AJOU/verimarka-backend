@@ -182,6 +182,32 @@ class ContentRegisterViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("확장자와 MIME", str(response.json()))
 
+    def test_register_rejects_disguised_image_payload(self):
+        upload = SimpleUploadedFile(
+            "sample.png", b"<script>alert(1)</script>", content_type="image/png"
+        )
+
+        response = self.client.post(
+            reverse("content_register"), {"file": upload}, format="multipart"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("파일 내용과 형식", str(response.json()))
+        self.assertEqual(Content.objects.count(), 0)
+
+    def test_register_rejects_disguised_document_payload(self):
+        upload = SimpleUploadedFile(
+            "sample.pdf", b"<html>not a pdf</html>", content_type="application/pdf"
+        )
+
+        response = self.client.post(
+            reverse("content_register"), {"file": upload}, format="multipart"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("파일 내용과 형식", str(response.json()))
+        self.assertEqual(Content.objects.count(), 0)
+
     @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
     @patch(
         "contents.api.services.registration.S3StorageService.is_enabled",
