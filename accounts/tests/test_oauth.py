@@ -10,6 +10,7 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import SocialAccount
+from accounts.services.google_oauth import GoogleOAuthError
 
 User = get_user_model()
 
@@ -91,10 +92,59 @@ class AuthThrottleTests(TestCase):
         self.assertTrue(all(response.status_code == 400 for response in responses[:10]))
         self.assertEqual(responses[-1].status_code, 429)
 
+    @patch("accounts.api.views_oauth.kakao_exchange_code_for_token")
+    def test_kakao_oauth_is_rate_limited(self, mock_exchange):
+        mock_exchange.return_value = {}
+        payload = {
+            "code": "kakao-auth-code",
+            "redirect_uri": "https://verimarka.com/auth/kakao/callback",
+        }
+
+        responses = [
+            self.client.post(reverse("oauth_kakao"), payload, format="json")
+            for _ in range(21)
+        ]
+
+        self.assertTrue(all(response.status_code == 400 for response in responses[:20]))
+        self.assertEqual(responses[-1].status_code, 429)
+
 
 class OAuthAccountLinkingTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_google_oauth_rejects_unallowed_redirect_uri(self, mock_exchange):
+        response = self.client.post(
+            reverse("oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://evil.example.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("redirect_uri", response.data["detail"])
+        mock_exchange.assert_not_called()
+
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_google_oauth_provider_error_is_sanitized(self, mock_exchange):
+        mock_exchange.side_effect = GoogleOAuthError(
+            "token_exchange_failed: 400 secret-token-provider-response"
+        )
+
+        response = self.client.post(
+            reverse("oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://verimarka.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("secret-token-provider-response", response.data["detail"])
 
     @patch("accounts.api.views_oauth.fetch_userinfo")
     @patch("accounts.api.views_oauth.exchange_code_for_token")

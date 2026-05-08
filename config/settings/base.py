@@ -187,6 +187,23 @@ APPLE_JWKS_URI = env(
     "APPLE_JWKS_URI",
     default="https://appleid.apple.com/auth/keys",
 )
+OAUTH_ALLOWED_REDIRECT_URIS = env.list(
+    "OAUTH_ALLOWED_REDIRECT_URIS",
+    default=[
+        "https://verimarka.com/auth/google/callback",
+        "https://verimarka.com/auth/kakao/callback",
+        "https://verimarka.com/auth/apple/callback",
+        "https://admin.verimarka.com/auth/google/callback",
+        "https://admin.verimarka.com/auth/kakao/callback",
+        "https://admin.verimarka.com/auth/apple/callback",
+        "http://localhost:5173/auth/google/callback",
+        "http://localhost:5173/auth/kakao/callback",
+        "http://localhost:5173/auth/apple/callback",
+        "http://localhost:5174/auth/google/callback",
+        "http://localhost:5174/auth/kakao/callback",
+        "http://localhost:5174/auth/apple/callback",
+    ],
+)
 
 SOLAPI_API_KEY = env("SOLAPI_API_KEY", default="")
 SOLAPI_API_SECRET = env("SOLAPI_API_SECRET", default="")

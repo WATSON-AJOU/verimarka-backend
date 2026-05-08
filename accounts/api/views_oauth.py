@@ -1,5 +1,8 @@
+import logging
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -38,6 +41,50 @@ from accounts.services.kakao_oauth import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
+
+
+def _normalize_redirect_uri(value: str | None) -> str:
+    if not value:
+        return ""
+    parsed = urlsplit(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path,
+            "",
+            "",
+        )
+    )
+
+
+def _is_allowed_redirect_uri(redirect_uri: str) -> bool:
+    normalized = _normalize_redirect_uri(redirect_uri)
+    if not normalized:
+        return False
+    allowed = {
+        _normalize_redirect_uri(item)
+        for item in getattr(settings, "OAUTH_ALLOWED_REDIRECT_URIS", [])
+    }
+    return normalized in allowed
+
+
+def _redirect_uri_error_response() -> Response:
+    return Response(
+        {"detail": "허용되지 않은 OAuth redirect_uri입니다."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _oauth_provider_error_response(provider: str, exc: Exception) -> Response:
+    logger.warning("%s.oauth.provider_failed", provider, exc_info=exc)
+    return Response(
+        {"detail": "OAuth 인증 제공자와 통신하는 중 오류가 발생했습니다."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 def build_social_identity(provider: str, email: str | None) -> dict[str, str]:
@@ -240,6 +287,8 @@ class GoogleOAuthLoginView(APIView):
                 {"detail": "code and redirect_uri are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not _is_allowed_redirect_uri(redirect_uri):
+            return _redirect_uri_error_response()
 
         try:
             token_data = exchange_code_for_token(code, redirect_uri, code_verifier)
@@ -253,10 +302,7 @@ class GoogleOAuthLoginView(APIView):
             profile = fetch_userinfo(access_token)
 
         except GoogleOAuthError as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _oauth_provider_error_response("google", exc)
 
         sub = profile.get("sub")
         email = profile.get("email")
@@ -300,6 +346,8 @@ class GoogleOAuthLoginView(APIView):
 
 class KakaoOAuthLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "oauth"
     require_admin = False
     allow_create = True
 
@@ -312,6 +360,8 @@ class KakaoOAuthLoginView(APIView):
                 {"detail": "code and redirect_uri are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not _is_allowed_redirect_uri(redirect_uri):
+            return _redirect_uri_error_response()
 
         try:
             token_data = kakao_exchange_code_for_token(code, redirect_uri)
@@ -325,10 +375,7 @@ class KakaoOAuthLoginView(APIView):
             profile = kakao_fetch_userinfo(access_token)
 
         except KakaoOAuthError as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _oauth_provider_error_response("kakao", exc)
 
         sub = str(profile.get("id")) if profile.get("id") else None
         kakao_account = profile.get("kakao_account", {}) or {}
@@ -373,6 +420,8 @@ class KakaoOAuthLoginView(APIView):
 
 class AppleOAuthLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "oauth"
     require_admin = False
     allow_create = True
 
@@ -386,6 +435,8 @@ class AppleOAuthLoginView(APIView):
                 {"detail": "code and redirect_uri are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not _is_allowed_redirect_uri(redirect_uri):
+            return _redirect_uri_error_response()
 
         try:
             token_data = apple_exchange_code_for_token(code, redirect_uri)
@@ -399,10 +450,7 @@ class AppleOAuthLoginView(APIView):
             profile = apple_verify_identity_token(raw_identity_token)
 
         except AppleOAuthError as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _oauth_provider_error_response("apple", exc)
 
         sub = profile.get("sub")
         email = profile.get("email")
