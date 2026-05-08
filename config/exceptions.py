@@ -1,6 +1,6 @@
 import logging
-from typing import Any
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from rest_framework import status
 from rest_framework.exceptions import ErrorDetail, ValidationError
@@ -9,11 +9,39 @@ from rest_framework.views import exception_handler
 
 from analysis.api.services import AIIntegrationError
 
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_SERVER_ERROR_MESSAGE = "서버 내부 오류가 발생했습니다."
-REDACTED_KEYS = {"password", "token", "access", "refresh", "authorization", "secret", "signature"}
+REDACTED_KEYS = {
+    "password",
+    "token",
+    "access",
+    "refresh",
+    "authorization",
+    "secret",
+    "signature",
+}
+STATUS_ERROR_CODES = {
+    status.HTTP_400_BAD_REQUEST: "INVALID_INPUT",
+    status.HTTP_401_UNAUTHORIZED: "AUTHENTICATION_REQUIRED",
+    status.HTTP_403_FORBIDDEN: "PERMISSION_DENIED",
+    status.HTTP_404_NOT_FOUND: "NOT_FOUND",
+    status.HTTP_429_TOO_MANY_REQUESTS: "TOO_MANY_REQUESTS",
+}
+STATUS_ERROR_MESSAGES = {
+    status.HTTP_400_BAD_REQUEST: "입력값을 확인해주세요.",
+    status.HTTP_401_UNAUTHORIZED: "로그인이 필요합니다.",
+    status.HTTP_403_FORBIDDEN: "요청을 처리할 권한이 없습니다.",
+    status.HTTP_404_NOT_FOUND: "요청한 대상을 찾을 수 없습니다.",
+    status.HTTP_429_TOO_MANY_REQUESTS: "요청이 많습니다. 잠시 후 다시 시도해주세요.",
+}
+DRF_DEFAULT_MESSAGES = {
+    "Authentication credentials were not provided.",
+    "자격 인증 데이터가 제공되지 않았습니다.",
+    "Given token not valid for any token type",
+    "You do not have permission to perform this action.",
+    "Not found.",
+}
 
 
 def verimarka_exception_handler(exc, context):
@@ -38,7 +66,9 @@ def verimarka_exception_handler(exc, context):
     response = exception_handler(exc, context)
     if response is not None:
         detail = response.data
-        message = _extract_error_message(detail)
+        message = _normalize_error_message(
+            _extract_error_message(detail), response.status_code
+        )
         payload = {
             "error_code": _resolve_error_code(exc, response.status_code),
             "error_message": message,
@@ -85,11 +115,26 @@ def _resolve_error_code(exc, status_code: int) -> str:
     if isinstance(exc, ValidationError):
         return "INVALID_INPUT"
 
+    if status_code in STATUS_ERROR_CODES:
+        return STATUS_ERROR_CODES[status_code]
+
     default_code = getattr(exc, "default_code", None)
     if isinstance(default_code, str) and default_code:
         return default_code.upper()
 
     return f"HTTP_{status_code}"
+
+
+def _normalize_error_message(message: str, status_code: int) -> str:
+    if message in DRF_DEFAULT_MESSAGES or (
+        status_code == status.HTTP_404_NOT_FOUND
+        and message.startswith("No ")
+        and message.endswith(" matches the given query.")
+    ):
+        return STATUS_ERROR_MESSAGES.get(status_code, message)
+    return message or STATUS_ERROR_MESSAGES.get(
+        status_code, DEFAULT_SERVER_ERROR_MESSAGE
+    )
 
 
 def _extract_error_message(detail) -> str:
@@ -162,20 +207,30 @@ def _build_request_snapshot(request) -> dict[str, Any]:
         "response_id": getattr(request, "response_id", None),
         "method": getattr(request, "method", None),
         "path": getattr(request, "path", None),
-        "query_params": _truncate_value(_sanitize_value(getattr(request, "query_params", {}))),
+        "query_params": _truncate_value(
+            _sanitize_value(getattr(request, "query_params", {}))
+        ),
         "data": _truncate_value(_sanitize_value(data)),
         "content_type": getattr(request, "content_type", None),
         "user_id": getattr(getattr(request, "user", None), "id", None),
         "client_ip": _extract_client_ip(request),
-        "user_agent": _truncate_value((getattr(request, "META", {}) or {}).get("HTTP_USER_AGENT")),
+        "user_agent": _truncate_value(
+            (getattr(request, "META", {}) or {}).get("HTTP_USER_AGENT")
+        ),
     }
 
 
 def _build_response_snapshot(response: Response, payload: Any) -> dict[str, Any]:
     return {
         "status_code": getattr(response, "status_code", None),
-        "error_code": payload.get("error_code") if isinstance(payload, Mapping) else None,
-        "detail": _truncate_value(_sanitize_value(payload.get("detail") if isinstance(payload, Mapping) else payload)),
+        "error_code": payload.get("error_code")
+        if isinstance(payload, Mapping)
+        else None,
+        "detail": _truncate_value(
+            _sanitize_value(
+                payload.get("detail") if isinstance(payload, Mapping) else payload
+            )
+        ),
     }
 
 
