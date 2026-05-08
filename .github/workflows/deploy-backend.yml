@@ -124,7 +124,6 @@ jobs:
           set -euo pipefail
 
           rollback_executed=0
-          certbot_backup_dir=""
 
           refresh_proxy() {
             local nginx_container_id
@@ -168,40 +167,7 @@ jobs:
             fi
           }
 
-          backup_certbot_state() {
-            certbot_backup_dir="$(mktemp -d)"
-
-            if [ -d deploy/certbot/conf ]; then
-              mkdir -p "${certbot_backup_dir}"
-              cp -a deploy/certbot/conf "${certbot_backup_dir}/conf"
-            fi
-
-            if [ -d deploy/certbot/www ]; then
-              mkdir -p "${certbot_backup_dir}"
-              cp -a deploy/certbot/www "${certbot_backup_dir}/www"
-            fi
-          }
-
-          restore_certbot_state() {
-            if [ -z "${certbot_backup_dir}" ] || [ ! -d "${certbot_backup_dir}" ]; then
-              return
-            fi
-
-            mkdir -p deploy/certbot
-
-            if [ -e "${certbot_backup_dir}/conf" ]; then
-              rm -rf deploy/certbot/conf
-              cp -a "${certbot_backup_dir}/conf" deploy/certbot/conf
-            fi
-
-            if [ -e "${certbot_backup_dir}/www" ]; then
-              rm -rf deploy/certbot/www
-              cp -a "${certbot_backup_dir}/www" deploy/certbot/www
-            fi
-          }
-
           clean_tracked_certbot_state() {
-            rm -rf deploy/certbot/conf deploy/certbot/www
             git checkout -- deploy/certbot/conf deploy/certbot/www 2>/dev/null || true
           }
 
@@ -255,7 +221,6 @@ jobs:
             git fetch origin
             clean_tracked_certbot_state
             git checkout "${PREVIOUS_SHA}"
-            restore_certbot_state
             ensure_certbot_state_present
             docker compose -f docker-compose.prod.yml up -d --build
             refresh_proxy
@@ -266,15 +231,14 @@ jobs:
           cd "${DEPLOY_PATH}"
           PREVIOUS_SHA="$(git rev-parse HEAD)"
 
-          backup_certbot_state
           clean_tracked_certbot_state
           git fetch origin
           git checkout "${DEPLOY_BRANCH}"
           git pull --ff-only origin "${DEPLOY_BRANCH}"
-          restore_certbot_state
           ensure_certbot_state_present
 
           docker compose -f docker-compose.prod.yml up -d --build
+          docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps verimarka-nginx
           refresh_proxy
           run_api_healthcheck
           run_public_healthcheck
