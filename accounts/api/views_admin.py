@@ -336,9 +336,30 @@ def _serialize_user_detail(
     user: User, request, activity_page: int = 1, activity_page_size: int = 10
 ) -> dict:
     wallet_link = getattr(user, "wallet_link", None)
-    contents = list(user.contents.order_by("-created_at"))
-    verification_logs = list(user.verification_history_logs.all())
-    vote_logs = list(user.vote_participations.select_related("content").all())
+    contents_queryset = user.contents.order_by("-created_at")
+    verification_logs_queryset = user.verification_history_logs.order_by("-created_at")
+    vote_logs_queryset = user.vote_participations.select_related("content").order_by(
+        "-created_at"
+    )
+    content_activity_count = (
+        contents_queryset.count()
+        + contents_queryset.filter(blockchain__vote__status="Approved").count()
+    )
+    total_count = (
+        content_activity_count
+        + verification_logs_queryset.count()
+        + vote_logs_queryset.count()
+    )
+    total_pages = (
+        max(1, ceil(total_count / activity_page_size)) if activity_page_size > 0 else 1
+    )
+    safe_page = min(max(activity_page, 1), total_pages)
+    start = (safe_page - 1) * activity_page_size
+    end = start + activity_page_size
+    candidate_limit = end
+    contents = list(contents_queryset[:candidate_limit])
+    verification_logs = list(verification_logs_queryset[:candidate_limit])
+    vote_logs = list(vote_logs_queryset[:candidate_limit])
     all_recent_activities = []
     for content in contents:
         all_recent_activities.extend(
@@ -353,13 +374,6 @@ def _serialize_user_detail(
     all_recent_activities = sorted(
         all_recent_activities, key=lambda item: item["sort_key"], reverse=True
     )
-    total_count = len(all_recent_activities)
-    total_pages = (
-        max(1, ceil(total_count / activity_page_size)) if activity_page_size > 0 else 1
-    )
-    safe_page = min(max(activity_page, 1), total_pages)
-    start = (safe_page - 1) * activity_page_size
-    end = start + activity_page_size
     recent_activities = all_recent_activities[start:end]
     return {
         **_serialize_user_list_item(user),
