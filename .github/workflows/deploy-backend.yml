@@ -259,8 +259,9 @@ jobs:
           restore_certbot_state
           ensure_certbot_state_present
 
-          docker compose -f docker-compose.prod.yml up -d --build
-          run_api_healthcheck
           refresh_proxy
+          docker compose -f docker-compose.prod.yml up -d --build
+          refresh_proxy
+          run_api_healthcheck
           run_public_healthcheck
           EOF
