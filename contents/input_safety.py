@@ -4,7 +4,7 @@ from pathlib import Path
 from django.utils import timezone
 from rest_framework import serializers
 
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BYTES = 30 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {
     "image/png": {".png"},
     "image/jpeg": {".jpg", ".jpeg"},
@@ -131,7 +131,7 @@ def validate_uploaded_image_file(upload):
     if file_size <= 0:
         raise serializers.ValidationError("비어 있는 파일은 업로드할 수 없습니다.")
     if file_size > MAX_IMAGE_BYTES:
-        raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
+        raise serializers.ValidationError("파일 크기는 30MB 이하만 가능합니다.")
 
     normalize_uploaded_filename(getattr(upload, "name", ""), mime_type=mime_type)
     validate_file_signature(upload, mime_type)
@@ -153,7 +153,7 @@ def validate_uploaded_content_file(upload):
     if file_size <= 0:
         raise serializers.ValidationError("비어 있는 파일은 업로드할 수 없습니다.")
     if file_size > MAX_IMAGE_BYTES:
-        raise serializers.ValidationError("파일 크기는 20MB 이하만 가능합니다.")
+        raise serializers.ValidationError("파일 크기는 30MB 이하만 가능합니다.")
 
     resolved_mime_type = resolve_upload_mime_type(upload)
     validate_file_signature(upload, resolved_mime_type)

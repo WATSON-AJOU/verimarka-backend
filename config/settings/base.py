@@ -26,8 +26,8 @@ def _default_ai_model_root(base_dir: Path) -> str:
 
 BASE_DIR = _find_project_base()
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 30 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 30 * 1024 * 1024
 
 env = environ.Env(
     DJANGO_DEBUG=(bool, False),
