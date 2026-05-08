@@ -127,7 +127,30 @@ jobs:
           certbot_backup_dir=""
 
           refresh_proxy() {
+            docker compose -f docker-compose.prod.yml exec -T verimarka-nginx nginx -t
             docker compose -f docker-compose.prod.yml exec -T verimarka-nginx nginx -s reload
+          }
+
+          print_diagnostics() {
+            echo "::group::docker compose ps"
+            docker compose -f docker-compose.prod.yml ps || true
+            echo "::endgroup::"
+
+            echo "::group::verimarka-api logs"
+            docker compose -f docker-compose.prod.yml logs --tail=200 verimarka-api || true
+            echo "::endgroup::"
+
+            echo "::group::verimarka-nginx logs"
+            docker compose -f docker-compose.prod.yml logs --tail=100 verimarka-nginx || true
+            echo "::endgroup::"
+          }
+
+          ensure_certbot_state_present() {
+            if [ ! -e deploy/certbot/conf/live/verimarka.com/fullchain.pem ] || [ ! -e deploy/certbot/conf/live/verimarka.com/privkey.pem ]; then
+              echo "Missing LetsEncrypt certificate files under deploy/certbot/conf/live/verimarka.com." >&2
+              echo "Refusing to recreate or reload nginx because it would break HTTPS." >&2
+              return 1
+            fi
           }
 
           backup_certbot_state() {
@@ -211,17 +234,19 @@ jobs:
               return
             fi
 
+            trap - ERR
             rollback_executed=1
             echo "Deployment failed. Rolling back to ${PREVIOUS_SHA}"
             git fetch origin
             clean_tracked_certbot_state
             git checkout "${PREVIOUS_SHA}"
             restore_certbot_state
+            ensure_certbot_state_present
             docker compose -f docker-compose.prod.yml up -d --build
             refresh_proxy
           }
 
-          trap 'status=$?; rollback; exit "${status}"' ERR
+          trap 'status=$?; print_diagnostics; rollback; exit "${status}"' ERR
 
           cd "${DEPLOY_PATH}"
           PREVIOUS_SHA="$(git rev-parse HEAD)"
@@ -232,6 +257,7 @@ jobs:
           git checkout "${DEPLOY_BRANCH}"
           git pull --ff-only origin "${DEPLOY_BRANCH}"
           restore_certbot_state
+          ensure_certbot_state_present
 
           docker compose -f docker-compose.prod.yml up -d --build
           run_api_healthcheck
