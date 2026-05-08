@@ -152,8 +152,17 @@ jobs:
           }
 
           ensure_certbot_state_present() {
-            if [ ! -e deploy/certbot/conf/live/verimarka.com/fullchain.pem ] || [ ! -e deploy/certbot/conf/live/verimarka.com/privkey.pem ]; then
-              echo "Missing LetsEncrypt certificate files under deploy/certbot/conf/live/verimarka.com." >&2
+            local missing=0
+            local cert_path
+            while IFS= read -r cert_path; do
+              local host_path="deploy/certbot/conf${cert_path#/etc/letsencrypt}"
+              if [ ! -e "${host_path}" ]; then
+                echo "Missing LetsEncrypt file required by nginx: ${host_path}" >&2
+                missing=1
+              fi
+            done < <(awk '/ssl_certificate(_key)?[[:space:]]+/ { value=$2; sub(/;$/, "", value); print value }' deploy/nginx/nginx.conf | sort -u)
+
+            if [ "${missing}" -ne 0 ]; then
               echo "Refusing to recreate or reload nginx because it would break HTTPS." >&2
               return 1
             fi
@@ -265,7 +274,6 @@ jobs:
           restore_certbot_state
           ensure_certbot_state_present
 
-          refresh_proxy
           docker compose -f docker-compose.prod.yml up -d --build
           refresh_proxy
           run_api_healthcheck
