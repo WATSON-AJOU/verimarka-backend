@@ -59,6 +59,15 @@ def _build_async_job_response(
     )
 
 
+def _reject_owner_review_vote(request, content: Content) -> Response | None:
+    if content.owner_id != getattr(request.user, "id", None):
+        return None
+    return Response(
+        {"message": "자신의 저작물 검증 투표에는 참여할 수 없습니다."},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
 class ContentRegisterView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated, IsPhoneVerified, IsWalletLinked]
@@ -493,6 +502,10 @@ class ContentReviewVoteSigningContextView(APIView):
             Content.objects.select_related("owner", "owner__wallet_link"),
             public_id=public_id,
         )
+        owner_vote_error = _reject_owner_review_vote(request, content)
+        if owner_vote_error is not None:
+            return owner_vote_error
+
         wallet_link = getattr(request.user, "wallet_link", None)
         if wallet_link is None or not wallet_link.address:
             return Response(
@@ -516,6 +529,10 @@ class ContentReviewVoteCastView(APIView):
             Content.objects.select_related("owner", "owner__wallet_link"),
             public_id=public_id,
         )
+        owner_vote_error = _reject_owner_review_vote(request, content)
+        if owner_vote_error is not None:
+            return owner_vote_error
+
         wallet_link = getattr(request.user, "wallet_link", None)
         if wallet_link is None or not wallet_link.address:
             return Response(
