@@ -127,6 +127,12 @@ jobs:
           certbot_backup_dir=""
 
           refresh_proxy() {
+            local nginx_container_id
+            nginx_container_id="$(docker compose -f docker-compose.prod.yml ps -q verimarka-nginx 2>/dev/null || true)"
+            if [ -z "${nginx_container_id}" ]; then
+              echo "verimarka-nginx is not running yet; skipping nginx reload."
+              return 0
+            fi
             docker compose -f docker-compose.prod.yml exec -T verimarka-nginx nginx -t
             docker compose -f docker-compose.prod.yml exec -T verimarka-nginx nginx -s reload
           }
