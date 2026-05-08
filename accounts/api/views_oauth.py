@@ -13,7 +13,11 @@ from accounts.api.serializers import MeSerializer
 from accounts.models import SocialAccount
 from accounts.services.apple_oauth import (
     AppleOAuthError,
+)
+from accounts.services.apple_oauth import (
     exchange_code_for_token as apple_exchange_code_for_token,
+)
+from accounts.services.apple_oauth import (
     verify_identity_token as apple_verify_identity_token,
 )
 from accounts.services.google_oauth import (
@@ -23,7 +27,11 @@ from accounts.services.google_oauth import (
 )
 from accounts.services.kakao_oauth import (
     KakaoOAuthError,
+)
+from accounts.services.kakao_oauth import (
     exchange_code_for_token as kakao_exchange_code_for_token,
+)
+from accounts.services.kakao_oauth import (
     fetch_userinfo as kakao_fetch_userinfo,
 )
 
@@ -63,6 +71,14 @@ def _record_social_login_success(request, user) -> None:
     user.save(update_fields=["last_login", "last_login_ip"])
 
 
+def _is_verified_claim(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return False
+
+
 def _get_existing_active_user_by_email(email: str | None):
     if not email:
         return None
@@ -83,7 +99,27 @@ def _validate_loginable_user(user):
     return None
 
 
-def _get_or_create_social_user(*, provider: str, sub: str, email: str | None):
+def _validate_admin_user(user):
+    login_error = _validate_loginable_user(user)
+    if login_error is not None:
+        return login_error
+    if not (user.is_staff or user.is_superuser):
+        return Response(
+            {"detail": "관리자 계정만 로그인할 수 있습니다."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _get_or_create_social_user(
+    *,
+    provider: str,
+    sub: str,
+    email: str | None,
+    email_verified: bool,
+    allow_create: bool = True,
+    require_admin: bool = False,
+):
     social = (
         SocialAccount.objects.select_related("user")
         .filter(provider=provider, provider_sub=sub)
@@ -91,13 +127,34 @@ def _get_or_create_social_user(*, provider: str, sub: str, email: str | None):
     )
     if social:
         user = social.user
-        return user, social, False, _validate_loginable_user(user)
+        error_response = (
+            _validate_admin_user(user)
+            if require_admin
+            else _validate_loginable_user(user)
+        )
+        return user, social, False, error_response
 
     user = _get_existing_active_user_by_email(email)
     if user:
+        if not email_verified:
+            return (
+                None,
+                None,
+                False,
+                Response(
+                    {
+                        "detail": "검증되지 않은 이메일은 기존 계정에 연결할 수 없습니다."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                ),
+            )
         error_response = _validate_loginable_user(user)
         if error_response is not None:
             return None, None, False, error_response
+        if require_admin:
+            error_response = _validate_admin_user(user)
+            if error_response is not None:
+                return None, None, False, error_response
 
         existing_provider_link = user.social_accounts.filter(provider=provider).first()
         if existing_provider_link:
@@ -120,27 +177,55 @@ def _get_or_create_social_user(*, provider: str, sub: str, email: str | None):
         )
         return user, social, False, None
 
-    identity = build_social_identity(provider, email)
+    if not allow_create:
+        return (
+            None,
+            None,
+            False,
+            Response(
+                {"detail": "관리자 계정에 연결된 소셜 계정이 없습니다."},
+                status=status.HTTP_403_FORBIDDEN,
+            ),
+        )
+
+    user_email = email if email_verified else None
+    identity = build_social_identity(provider, user_email)
     user = User.objects.create_user(
         username=identity["username"],
         nickname=identity["nickname"],
         display_name=identity["display_name"],
         auth_provider=provider,
-        email=email or "",
+        email=user_email or "",
         **get_oauth_agreement_defaults(),
     )
     social = SocialAccount.objects.create(
         user=user,
         provider=provider,
         provider_sub=sub,
-        email=email or "",
+        email=user_email or "",
         last_login_at=timezone.now(),
     )
     return user, social, True, None
 
 
+def _build_oauth_response(user, created: bool):
+    refresh = RefreshToken.for_user(user)
+    serializer = MeSerializer(user).data
+    return Response(
+        {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "user": serializer,
+            "created": created,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 class GoogleOAuthLoginView(APIView):
     permission_classes = [AllowAny]
+    require_admin = False
+    allow_create = True
 
     def post(self, request):
         code = request.data.get("code")
@@ -172,6 +257,7 @@ class GoogleOAuthLoginView(APIView):
 
         sub = profile.get("sub")
         email = profile.get("email")
+        email_verified = _is_verified_claim(profile.get("email_verified"))
 
         if not sub:
             return Response(
@@ -185,11 +271,14 @@ class GoogleOAuthLoginView(APIView):
                     provider="google",
                     sub=sub,
                     email=email,
+                    email_verified=email_verified,
+                    allow_create=self.allow_create,
+                    require_admin=self.require_admin,
                 )
                 if error_response is not None:
                     return error_response
 
-                if email and user.email != email:
+                if email_verified and email and user.email != email:
                     user.email = email
                     user.save(update_fields=["email"])
 
@@ -203,20 +292,13 @@ class GoogleOAuthLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": MeSerializer(user).data,
-                "created": created,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return _build_oauth_response(user, created)
 
 
 class KakaoOAuthLoginView(APIView):
     permission_classes = [AllowAny]
+    require_admin = False
+    allow_create = True
 
     def post(self, request):
         code = request.data.get("code")
@@ -248,6 +330,7 @@ class KakaoOAuthLoginView(APIView):
         sub = str(profile.get("id")) if profile.get("id") else None
         kakao_account = profile.get("kakao_account", {}) or {}
         email = kakao_account.get("email")
+        email_verified = _is_verified_claim(kakao_account.get("is_email_verified"))
 
         if not sub:
             return Response(
@@ -261,11 +344,14 @@ class KakaoOAuthLoginView(APIView):
                     provider="kakao",
                     sub=sub,
                     email=email,
+                    email_verified=email_verified,
+                    allow_create=self.allow_create,
+                    require_admin=self.require_admin,
                 )
                 if error_response is not None:
                     return error_response
 
-                if email and user.email != email:
+                if email_verified and email and user.email != email:
                     user.email = email
                     user.save(update_fields=["email"])
 
@@ -279,20 +365,13 @@ class KakaoOAuthLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": MeSerializer(user).data,
-                "created": created,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return _build_oauth_response(user, created)
 
 
 class AppleOAuthLoginView(APIView):
     permission_classes = [AllowAny]
+    require_admin = False
+    allow_create = True
 
     def post(self, request):
         code = request.data.get("code")
@@ -324,6 +403,7 @@ class AppleOAuthLoginView(APIView):
 
         sub = profile.get("sub")
         email = profile.get("email")
+        email_verified = _is_verified_claim(profile.get("email_verified"))
 
         if not sub:
             return Response(
@@ -337,11 +417,14 @@ class AppleOAuthLoginView(APIView):
                     provider="apple",
                     sub=sub,
                     email=email,
+                    email_verified=email_verified,
+                    allow_create=self.allow_create,
+                    require_admin=self.require_admin,
                 )
                 if error_response is not None:
                     return error_response
 
-                if email and user.email != email:
+                if email_verified and email and user.email != email:
                     user.email = email
                     user.save(update_fields=["email"])
 
@@ -355,13 +438,19 @@ class AppleOAuthLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-                "user": MeSerializer(user).data,
-                "created": created,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return _build_oauth_response(user, created)
+
+
+class AdminGoogleOAuthLoginView(GoogleOAuthLoginView):
+    require_admin = True
+    allow_create = False
+
+
+class AdminKakaoOAuthLoginView(KakaoOAuthLoginView):
+    require_admin = True
+    allow_create = False
+
+
+class AdminAppleOAuthLoginView(AppleOAuthLoginView):
+    require_admin = True
+    allow_create = False

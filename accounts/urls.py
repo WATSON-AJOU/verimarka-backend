@@ -1,40 +1,91 @@
 from django.urls import path
-from .api.views import DisplayNameAvailabilityView, MeView, NicknameAvailabilityView, WithdrawView
+
 from .api.views import (
+    AdminAppleOAuthLoginView,
     AdminDashboardView,
+    AdminGoogleOAuthLoginView,
     AdminImageDetailView,
     AdminImageListView,
+    AdminKakaoOAuthLoginView,
+    AdminLoginView,
+    AdminMeView,
     AdminUserDetailView,
     AdminUserListView,
     AdminVoteDetailView,
     AdminVoteListView,
+    AppleOAuthLoginView,
+    DisplayNameAvailabilityView,
+    EmailSendCodeView,
+    EmailVerifyCodeView,
+    GoogleOAuthLoginView,
+    KakaoOAuthLoginView,
+    LoginView,
+    LogoutView,
+    MeView,
+    NicknameAvailabilityView,
+    PhoneSendCodeView,
+    PhoneVerifyCodeView,
+    SignupView,
+    WithdrawView,
 )
-from .api.views import AppleOAuthLoginView, GoogleOAuthLoginView, KakaoOAuthLoginView
-from .api.views import PhoneSendCodeView, PhoneVerifyCodeView
-from .api.views import EmailSendCodeView, EmailVerifyCodeView
-from .api.views import AdminLoginView, AdminMeView, LoginView, SignupView
 
 urlpatterns = [
     path("admin/dashboard/", AdminDashboardView.as_view(), name="admin_dashboard"),
     path("admin/users/", AdminUserListView.as_view(), name="admin_user_list"),
-    path("admin/users/<int:user_id>/", AdminUserDetailView.as_view(), name="admin_user_detail"),
+    path(
+        "admin/users/<int:user_id>/",
+        AdminUserDetailView.as_view(),
+        name="admin_user_detail",
+    ),
     path("admin/images/", AdminImageListView.as_view(), name="admin_image_list"),
-    path("admin/images/<uuid:public_id>/", AdminImageDetailView.as_view(), name="admin_image_detail"),
+    path(
+        "admin/images/<uuid:public_id>/",
+        AdminImageDetailView.as_view(),
+        name="admin_image_detail",
+    ),
     path("admin/votes/", AdminVoteListView.as_view(), name="admin_vote_list"),
-    path("admin/votes/<uuid:public_id>/", AdminVoteDetailView.as_view(), name="admin_vote_detail"),
+    path(
+        "admin/votes/<uuid:public_id>/",
+        AdminVoteDetailView.as_view(),
+        name="admin_vote_detail",
+    ),
     path("me/", MeView.as_view(), name="me"),
     path("admin/me/", AdminMeView.as_view(), name="admin_me"),
     path("withdraw/", WithdrawView.as_view(), name="withdraw"),
-    path("nickname-availability/", NicknameAvailabilityView.as_view(), name="nickname_availability"),
-    path("display-name-availability/", DisplayNameAvailabilityView.as_view(), name="display_name_availability"),
+    path(
+        "nickname-availability/",
+        NicknameAvailabilityView.as_view(),
+        name="nickname_availability",
+    ),
+    path(
+        "display-name-availability/",
+        DisplayNameAvailabilityView.as_view(),
+        name="display_name_availability",
+    ),
     path("auth/oauth/google/", GoogleOAuthLoginView.as_view(), name="oauth_google"),
     path("auth/oauth/kakao/", KakaoOAuthLoginView.as_view(), name="oauth_kakao"),
     path("auth/oauth/apple/", AppleOAuthLoginView.as_view(), name="oauth_apple"),
+    path(
+        "admin/auth/oauth/google/",
+        AdminGoogleOAuthLoginView.as_view(),
+        name="admin_oauth_google",
+    ),
+    path(
+        "admin/auth/oauth/kakao/",
+        AdminKakaoOAuthLoginView.as_view(),
+        name="admin_oauth_kakao",
+    ),
+    path(
+        "admin/auth/oauth/apple/",
+        AdminAppleOAuthLoginView.as_view(),
+        name="admin_oauth_apple",
+    ),
     path("phone/send-code/", PhoneSendCodeView.as_view(), name="phone_send_code"),
     path("phone/verify-code/", PhoneVerifyCodeView.as_view(), name="phone_verify_code"),
     path("email/send-code/", EmailSendCodeView.as_view(), name="email_send_code"),
     path("email/verify-code/", EmailVerifyCodeView.as_view(), name="email_verify_code"),
     path("signup/", SignupView.as_view(), name="signup"),
     path("login/", LoginView.as_view(), name="login"),
+    path("logout/", LogoutView.as_view(), name="logout"),
     path("admin/login/", AdminLoginView.as_view(), name="admin_login"),
 ]

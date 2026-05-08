@@ -4,9 +4,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import SocialAccount
-
 
 User = get_user_model()
 
@@ -17,7 +18,9 @@ class OAuthAccountLinkingTests(TestCase):
 
     @patch("accounts.api.views_oauth.fetch_userinfo")
     @patch("accounts.api.views_oauth.exchange_code_for_token")
-    def test_google_oauth_links_existing_user_by_email(self, mock_exchange, mock_userinfo):
+    def test_google_oauth_links_existing_user_by_email(
+        self, mock_exchange, mock_userinfo
+    ):
         user = User.objects.create_user(
             username="existing-user",
             email="existing@example.com",
@@ -32,6 +35,7 @@ class OAuthAccountLinkingTests(TestCase):
         mock_userinfo.return_value = {
             "sub": "google-sub-123",
             "email": "existing@example.com",
+            "email_verified": True,
         }
 
         response = self.client.post(
@@ -57,7 +61,9 @@ class OAuthAccountLinkingTests(TestCase):
 
     @patch("accounts.api.views_oauth.kakao_fetch_userinfo")
     @patch("accounts.api.views_oauth.kakao_exchange_code_for_token")
-    def test_kakao_oauth_links_existing_user_by_email(self, mock_exchange, mock_userinfo):
+    def test_kakao_oauth_links_existing_user_by_email(
+        self, mock_exchange, mock_userinfo
+    ):
         user = User.objects.create_user(
             username="existing-kakao-user",
             email="kakao@example.com",
@@ -71,6 +77,7 @@ class OAuthAccountLinkingTests(TestCase):
             "id": 999999,
             "kakao_account": {
                 "email": "kakao@example.com",
+                "is_email_verified": True,
             },
         }
 
@@ -109,6 +116,7 @@ class OAuthAccountLinkingTests(TestCase):
         mock_verify.return_value = {
             "sub": "apple-sub-123",
             "email": "apple@example.com",
+            "email_verified": "true",
         }
 
         response = self.client.post(
@@ -130,3 +138,136 @@ class OAuthAccountLinkingTests(TestCase):
                 provider_sub="apple-sub-123",
             ).exists()
         )
+
+    @patch("accounts.api.views_oauth.fetch_userinfo")
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_google_oauth_rejects_unverified_email_linking(
+        self, mock_exchange, mock_userinfo
+    ):
+        user = User.objects.create_user(
+            username="unverified-link-user",
+            email="unverified@example.com",
+            password="Password123",
+            nickname="unverifiednick",
+            display_name="Unverified User",
+        )
+
+        mock_exchange.return_value = {"access_token": "google-access-token"}
+        mock_userinfo.return_value = {
+            "sub": "google-unverified-sub",
+            "email": "unverified@example.com",
+            "email_verified": False,
+        }
+
+        response = self.client.post(
+            reverse("oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://verimarka.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            SocialAccount.objects.filter(
+                user=user,
+                provider="google",
+                provider_sub="google-unverified-sub",
+            ).exists()
+        )
+
+    @patch("accounts.api.views_oauth.fetch_userinfo")
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_admin_google_oauth_does_not_create_non_admin_user(
+        self, mock_exchange, mock_userinfo
+    ):
+        mock_exchange.return_value = {"access_token": "google-access-token"}
+        mock_userinfo.return_value = {
+            "sub": "new-google-admin-sub",
+            "email": "new-admin-attempt@example.com",
+            "email_verified": True,
+        }
+
+        response = self.client.post(
+            reverse("admin_oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://admin.verimarka.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(
+            User.objects.filter(email="new-admin-attempt@example.com").exists()
+        )
+        self.assertFalse(
+            SocialAccount.objects.filter(
+                provider="google", provider_sub="new-google-admin-sub"
+            ).exists()
+        )
+
+    @patch("accounts.api.views_oauth.fetch_userinfo")
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_admin_google_oauth_links_existing_admin_by_verified_email(
+        self, mock_exchange, mock_userinfo
+    ):
+        user = User.objects.create_user(
+            username="existing-admin-oauth",
+            email="admin-oauth@example.com",
+            password="Password123",
+            nickname="adminoauth",
+            display_name="Admin OAuth",
+            is_staff=True,
+        )
+
+        mock_exchange.return_value = {"access_token": "google-access-token"}
+        mock_userinfo.return_value = {
+            "sub": "admin-google-sub",
+            "email": "admin-oauth@example.com",
+            "email_verified": True,
+        }
+
+        response = self.client.post(
+            reverse("admin_oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://admin.verimarka.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["created"])
+        self.assertEqual(response.data["user"]["id"], user.id)
+        self.assertTrue(
+            SocialAccount.objects.filter(
+                user=user, provider="google", provider_sub="admin-google-sub"
+            ).exists()
+        )
+
+
+class LogoutTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_logout_blacklists_refresh_token(self):
+        user = User.objects.create_user(
+            username="logout-user",
+            email="logout@example.com",
+            password="Password123",
+            nickname="logoutnick",
+            display_name="Logout User",
+        )
+        refresh = RefreshToken.for_user(user)
+
+        response = self.client.post(
+            reverse("logout"),
+            {"refresh": str(refresh)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["refresh_blacklisted"])
+        self.assertEqual(BlacklistedToken.objects.count(), 1)

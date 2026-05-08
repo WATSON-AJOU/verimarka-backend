@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.api.serializers import (
@@ -25,6 +26,16 @@ def _record_login_success(request, user) -> None:
     user.last_login = timezone.now()
     user.last_login_ip = _get_client_ip(request)
     user.save(update_fields=["last_login", "last_login_ip"])
+
+
+def blacklist_refresh_token(raw_refresh: str | None) -> bool:
+    if not raw_refresh:
+        return False
+    try:
+        RefreshToken(raw_refresh).blacklist()
+        return True
+    except (AttributeError, TokenError):
+        return False
 
 
 class SignupView(APIView):
@@ -63,6 +74,20 @@ class LoginView(APIView):
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
                 "user": MeSerializer(user).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        blacklisted = blacklist_refresh_token(request.data.get("refresh"))
+        return Response(
+            {
+                "message": "로그아웃되었습니다.",
+                "refresh_blacklisted": blacklisted,
             },
             status=status.HTTP_200_OK,
         )

@@ -9,6 +9,7 @@ from accounts.api.serializers import (
     MeUpdateSerializer,
     NicknameAvailabilitySerializer,
 )
+from accounts.api.views_auth import blacklist_refresh_token
 from accounts.models import User
 
 
@@ -33,6 +34,7 @@ class WithdrawView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
+        blacklist_refresh_token(request.data.get("refresh"))
         request.user.soft_delete()
         return Response(
             {"message": "회원 탈퇴가 완료되었습니다."},
@@ -59,7 +61,9 @@ class NicknameAvailabilityView(APIView):
         return Response(
             {
                 "available": not exists,
-                "message": "사용 가능한 닉네임입니다." if not exists else "이미 사용 중인 닉네임입니다.",
+                "message": "사용 가능한 닉네임입니다."
+                if not exists
+                else "이미 사용 중인 닉네임입니다.",
             },
             status=status.HTTP_200_OK,
         )
@@ -80,11 +84,17 @@ class DisplayNameAvailabilityView(APIView):
             )
 
         display_name = serializer.validated_data["display_name"]
-        exists = User.objects.filter(display_name=display_name).exclude(id=request.user.id).exists()
+        exists = (
+            User.objects.filter(display_name=display_name)
+            .exclude(id=request.user.id)
+            .exists()
+        )
         return Response(
             {
                 "available": not exists,
-                "message": "사용 가능한 표시명입니다." if not exists else "이미 사용 중인 표시명입니다.",
+                "message": "사용 가능한 표시명입니다."
+                if not exists
+                else "이미 사용 중인 표시명입니다.",
             },
             status=status.HTTP_200_OK,
         )
