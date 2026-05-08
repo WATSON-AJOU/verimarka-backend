@@ -1,15 +1,22 @@
 import importlib
 import os
 
+import pytest
+from django.core.exceptions import ImproperlyConfigured
 
-def test_production_settings_enable_browser_security_headers(monkeypatch):
-    monkeypatch.setenv("DJANGO_SECRET_KEY", "test-secret-key")
+
+def _set_required_prod_env(monkeypatch):
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "test-secret-key-for-production-checks")
     monkeypatch.setenv("DJANGO_ALLOWED_HOSTS", "api.example.com")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://example.com")
     monkeypatch.setenv("DB_NAME", "verimarka")
     monkeypatch.setenv("DB_USER", "verimarka")
     monkeypatch.setenv("DB_PASSWORD", "verimarka")
     monkeypatch.setenv("DB_HOST", "127.0.0.1")
+
+
+def test_production_settings_enable_browser_security_headers(monkeypatch):
+    _set_required_prod_env(monkeypatch)
 
     previous_settings_module = os.environ.get("DJANGO_SETTINGS_MODULE")
     os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
@@ -32,3 +39,19 @@ def test_production_settings_enable_browser_security_headers(monkeypatch):
     assert prod.SESSION_COOKIE_SAMESITE == "Lax"
     assert prod.CSRF_COOKIE_SECURE is True
     assert prod.CSRF_COOKIE_SAMESITE == "Lax"
+
+
+def test_production_settings_reject_debug_true(monkeypatch):
+    _set_required_prod_env(monkeypatch)
+    monkeypatch.setenv("DJANGO_DEBUG", "True")
+
+    previous_settings_module = os.environ.get("DJANGO_SETTINGS_MODULE")
+    os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
+    try:
+        with pytest.raises(ImproperlyConfigured, match="DJANGO_DEBUG"):
+            importlib.reload(importlib.import_module("config.settings.prod"))
+    finally:
+        if previous_settings_module is None:
+            os.environ.pop("DJANGO_SETTINGS_MODULE", None)
+        else:
+            os.environ["DJANGO_SETTINGS_MODULE"] = previous_settings_module

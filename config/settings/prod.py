@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 env = environ.Env()
@@ -9,10 +10,20 @@ env.read_env(BASE_DIR / ".env.prod")
 from .base import *  # noqa: E402,F403
 
 SECRET_KEY = env("DJANGO_SECRET_KEY")
+if len(SECRET_KEY) < 32 or SECRET_KEY in {"change-me", "unsafe-secret-key"}:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be a strong production secret.")
+
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
+if DEBUG:
+    raise ImproperlyConfigured("DJANGO_DEBUG must be False in production settings.")
+
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must be set in production.")
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+if not CORS_ALLOWED_ORIGINS:
+    raise ImproperlyConfigured("CORS_ALLOWED_ORIGINS must be set in production.")
 
 DATABASES = {
     "default": {
