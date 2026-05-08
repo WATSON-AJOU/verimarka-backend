@@ -20,6 +20,7 @@ from analysis.api.services import AIIntegrationError
 from config.sentry import capture_sentry_message
 
 from .models import Content
+from .path_safety import resolve_existing_media_path
 from .storage import S3StorageService
 
 logger = logging.getLogger(__name__)
@@ -1055,8 +1056,9 @@ class ContentBlockchainService:
         output_key = watermark.get("output_key")
         output_url = watermark.get("output_url")
 
-        if output_path and Path(output_path).exists():
-            return Path(output_path).read_bytes()
+        local_output_path = resolve_existing_media_path(output_path)
+        if local_output_path is not None:
+            return local_output_path.read_bytes()
 
         if output_key and S3StorageService.is_enabled():
             client = S3StorageService._get_client()
@@ -1065,13 +1067,9 @@ class ContentBlockchainService:
             )
             return obj["Body"].read()
 
-        if output_url and not str(output_url).startswith(("http://", "https://")):
-            relative_path = (
-                str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
-            )
-            local_path = Path(settings.MEDIA_ROOT) / relative_path
-            if local_path.exists():
-                return local_path.read_bytes()
+        local_output_url = resolve_existing_media_path(output_url)
+        if local_output_url is not None:
+            return local_output_url.read_bytes()
 
         if output_url and str(output_url).startswith(("http://", "https://")):
             try:

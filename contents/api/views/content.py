@@ -1,6 +1,5 @@
 import logging
 import secrets
-from pathlib import Path
 from urllib.parse import quote
 
 from django.conf import settings
@@ -37,6 +36,7 @@ from contents.input_safety import (
     resolve_upload_mime_type,
 )
 from contents.models import Content, VoteParticipationLog
+from contents.path_safety import resolve_existing_media_path
 from contents.storage import S3StorageService
 from contents.verification_service import ContentVerificationService
 
@@ -393,10 +393,10 @@ class ContentWatermarkDownloadView(APIView):
             )
             return response
 
-        output_path = watermark.get("output_path")
-        if output_path and Path(output_path).exists():
+        output_path = resolve_existing_media_path(watermark.get("output_path"))
+        if output_path is not None:
             response = FileResponse(
-                open(output_path, "rb"),
+                output_path.open("rb"),
                 as_attachment=True,
                 filename=filename,
                 content_type=content_type,
@@ -407,22 +407,18 @@ class ContentWatermarkDownloadView(APIView):
             return response
 
         output_url = watermark.get("output_url")
-        if output_url and not str(output_url).startswith(("http://", "https://")):
-            relative_path = (
-                str(output_url).replace(settings.MEDIA_URL, "", 1).lstrip("/")
+        local_path = resolve_existing_media_path(output_url)
+        if local_path is not None:
+            response = FileResponse(
+                local_path.open("rb"),
+                as_attachment=True,
+                filename=filename,
+                content_type=content_type,
             )
-            local_path = Path(settings.MEDIA_ROOT) / relative_path
-            if local_path.exists():
-                response = FileResponse(
-                    open(local_path, "rb"),
-                    as_attachment=True,
-                    filename=filename,
-                    content_type=content_type,
-                )
-                response["Content-Disposition"] = (
-                    f"attachment; filename*=UTF-8''{quote(filename)}"
-                )
-                return response
+            response["Content-Disposition"] = (
+                f"attachment; filename*=UTF-8''{quote(filename)}"
+            )
+            return response
 
         raise Http404("워터마크 파일을 찾을 수 없습니다.")
 
