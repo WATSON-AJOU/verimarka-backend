@@ -1,7 +1,9 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
@@ -51,6 +53,43 @@ class AuthCookieTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.data)
         self.assertNotIn("refresh", response.data)
+
+
+@override_settings(
+    REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": (
+            "rest_framework_simplejwt.authentication.JWTAuthentication",
+        ),
+        "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+        "DEFAULT_THROTTLE_RATES": {"auth": "2/min", "oauth": "2/min"},
+        "EXCEPTION_HANDLER": "config.exceptions.verimarka_exception_handler",
+    }
+)
+class AuthThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        User.objects.create_user(
+            username="throttle@example.com",
+            email="throttle@example.com",
+            password="Password123",
+            nickname="throttlenick",
+            display_name="Throttle User",
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_login_is_rate_limited(self):
+        payload = {"email": "throttle@example.com", "password": "wrong-password"}
+
+        responses = [
+            self.client.post(reverse("login"), payload, format="json")
+            for _ in range(11)
+        ]
+
+        self.assertTrue(all(response.status_code == 400 for response in responses[:10]))
+        self.assertEqual(responses[-1].status_code, 429)
 
 
 class OAuthAccountLinkingTests(TestCase):

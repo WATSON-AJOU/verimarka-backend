@@ -142,6 +142,10 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": env("DRF_AUTH_THROTTLE_RATE", default="10/min"),
+        "oauth": env("DRF_OAUTH_THROTTLE_RATE", default="20/min"),
+    },
     "EXCEPTION_HANDLER": "config.exceptions.verimarka_exception_handler",
 }
 
