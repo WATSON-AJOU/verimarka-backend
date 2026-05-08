@@ -18,6 +18,7 @@ from accounts.services.sms_service import (
 )
 
 User = get_user_model()
+MAX_SMS_VERIFY_FAIL_COUNT = 5
 
 
 def normalize_phone(phone: str) -> str:
@@ -138,9 +139,24 @@ class PhoneVerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if verification.fail_count >= MAX_SMS_VERIFY_FAIL_COUNT:
+            return Response(
+                {
+                    "detail": "인증 시도 횟수를 초과했습니다. 인증번호를 다시 요청해주세요."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if verification.code_hash != hash_code(code):
             verification.fail_count += 1
             verification.save(update_fields=["fail_count"])
+            if verification.fail_count >= MAX_SMS_VERIFY_FAIL_COUNT:
+                return Response(
+                    {
+                        "detail": "인증 시도 횟수를 초과했습니다. 인증번호를 다시 요청해주세요."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(
                 {"detail": "인증번호가 일치하지 않습니다."},
                 status=status.HTTP_400_BAD_REQUEST,

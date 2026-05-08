@@ -125,6 +125,33 @@ class PhoneVerificationTests(TestCase):
         self.user.refresh_from_db()
         self.assertFalse(self.user.phone_verified)
 
+    def test_verify_code_blocks_after_too_many_wrong_sms_codes(self):
+        verification = SmsVerification.objects.create(
+            user=self.user,
+            phone="01012345678",
+            code_hash=hash_sms_code("123456"),
+            expires_at=timezone.now() + timedelta(minutes=3),
+            fail_count=4,
+        )
+
+        response = self.client.post(
+            reverse("phone_verify_code"),
+            {"phone": "010-1234-5678", "code": "000000"},
+            format="json",
+        )
+        blocked_response = self.client.post(
+            reverse("phone_verify_code"),
+            {"phone": "010-1234-5678", "code": "123456"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(blocked_response.status_code, 400)
+        verification.refresh_from_db()
+        self.assertEqual(verification.fail_count, 5)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.phone_verified)
+
     def test_verify_code_updates_user_and_marks_request_verified(self):
         verification = SmsVerification.objects.create(
             user=self.user,
@@ -222,6 +249,37 @@ class EmailVerificationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "email@example.com")
+        self.assertFalse(self.user.email_verified)
+
+    def test_verify_code_blocks_after_too_many_wrong_email_codes(self):
+        from accounts.services.email_verification_store import store_code
+
+        store_code(self.user.id, "new@example.com", "654321")
+
+        for _ in range(4):
+            response = self.client.post(
+                reverse("email_verify_code"),
+                {"email": "new@example.com", "code": "000000"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        blocked_response = self.client.post(
+            reverse("email_verify_code"),
+            {"email": "new@example.com", "code": "000000"},
+            format="json",
+        )
+        correct_after_blocked_response = self.client.post(
+            reverse("email_verify_code"),
+            {"email": "new@example.com", "code": "654321"},
+            format="json",
+        )
+
+        self.assertEqual(blocked_response.status_code, 400)
+        self.assertEqual(correct_after_blocked_response.status_code, 400)
+        self.assertIsNone(get_code_hash(self.user.id, "new@example.com"))
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, "email@example.com")
         self.assertFalse(self.user.email_verified)

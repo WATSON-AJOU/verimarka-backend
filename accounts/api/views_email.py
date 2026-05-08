@@ -13,13 +13,16 @@ from accounts.services.email_service import (
 )
 from accounts.services.email_verification_store import (
     EMAIL_VERIFY_DAILY_LIMIT,
+    EMAIL_VERIFY_MAX_FAIL_COUNT,
     EMAIL_VERIFY_TTL_SECONDS,
     EmailVerificationStoreError,
     delete_code,
     get_code_hash,
     get_daily_count,
+    get_fail_count,
     hash_code,
     increment_daily_count,
+    increment_fail_count,
     store_code,
 )
 
@@ -39,7 +42,9 @@ class EmailSendCodeView(APIView):
 
         email = normalize_email(serializer.validated_data["email"])
         if not email:
-            return Response({"detail": "이메일을 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "이메일을 입력해주세요."}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         exists = (
             User.objects.filter(email__iexact=email, email_verified=True)
@@ -55,10 +60,15 @@ class EmailSendCodeView(APIView):
         try:
             today_count = get_daily_count(request.user.id)
         except EmailVerificationStoreError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         if today_count >= EMAIL_VERIFY_DAILY_LIMIT:
-            return Response({"detail": "하루 최대 3번까지만 인증번호를 요청할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "하루 최대 3번까지만 인증번호를 요청할 수 있습니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         code = generate_verification_code()
 
@@ -67,7 +77,9 @@ class EmailSendCodeView(APIView):
             store_code(request.user.id, email, code)
             send_verification_email(email, code)
         except (EmailSendError, EmailVerificationStoreError) as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response(
             {
@@ -92,12 +104,46 @@ class EmailVerifyCodeView(APIView):
         try:
             saved_code_hash = get_code_hash(request.user.id, email)
         except EmailVerificationStoreError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         if not saved_code_hash:
-            return Response({"detail": "인증 요청이 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "인증 요청이 없습니다."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            fail_count = get_fail_count(request.user.id, email)
+        except EmailVerificationStoreError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        if fail_count >= EMAIL_VERIFY_MAX_FAIL_COUNT:
+            return Response(
+                {
+                    "detail": "인증 시도 횟수를 초과했습니다. 인증번호를 다시 요청해주세요."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if saved_code_hash != hash_code(code):
-            return Response({"detail": "인증번호가 일치하지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                next_fail_count = increment_fail_count(request.user.id, email)
+            except EmailVerificationStoreError as exc:
+                return Response(
+                    {"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            if next_fail_count >= EMAIL_VERIFY_MAX_FAIL_COUNT:
+                delete_code(request.user.id, email)
+                return Response(
+                    {
+                        "detail": "인증 시도 횟수를 초과했습니다. 인증번호를 다시 요청해주세요."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": "인증번호가 일치하지 않습니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         exists = (
             User.objects.filter(email__iexact=email, email_verified=True)
@@ -113,7 +159,9 @@ class EmailVerifyCodeView(APIView):
         request.user.email = email
         request.user.email_verified = True
         request.user.email_verified_at = timezone.now()
-        request.user.save(update_fields=["email", "email_verified", "email_verified_at"])
+        request.user.save(
+            update_fields=["email", "email_verified", "email_verified_at"]
+        )
         delete_code(request.user.id, email)
 
         return Response(

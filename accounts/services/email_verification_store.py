@@ -7,9 +7,9 @@ from django.utils import timezone
 
 from accounts.services.fake_redis import FakeRedis
 
-
 EMAIL_VERIFY_TTL_SECONDS = 180
 EMAIL_VERIFY_DAILY_LIMIT = 3
+EMAIL_VERIFY_MAX_FAIL_COUNT = 5
 
 
 class EmailVerificationStoreError(Exception):
@@ -30,6 +30,10 @@ def _redis_client() -> redis.Redis:
 
 def _code_key(user_id: int, email: str) -> str:
     return f"email_verify:code:{user_id}:{email}"
+
+
+def _fail_key(user_id: int, email: str) -> str:
+    return f"email_verify:fail:{user_id}:{email}"
 
 
 def _daily_key(user_id: int, date: datetime) -> str:
@@ -58,6 +62,7 @@ def increment_daily_count(user_id: int) -> int:
 def store_code(user_id: int, email: str, code: str) -> None:
     client = _redis_client()
     client.setex(_code_key(user_id, email), EMAIL_VERIFY_TTL_SECONDS, hash_code(code))
+    client.delete(_fail_key(user_id, email))
 
 
 def get_code_hash(user_id: int, email: str) -> str | None:
@@ -65,6 +70,21 @@ def get_code_hash(user_id: int, email: str) -> str | None:
     return client.get(_code_key(user_id, email))
 
 
+def get_fail_count(user_id: int, email: str) -> int:
+    client = _redis_client()
+    return int(client.get(_fail_key(user_id, email)) or 0)
+
+
+def increment_fail_count(user_id: int, email: str) -> int:
+    client = _redis_client()
+    key = _fail_key(user_id, email)
+    count = client.incr(key)
+    if count == 1:
+        client.expire(key, EMAIL_VERIFY_TTL_SECONDS)
+    return int(count)
+
+
 def delete_code(user_id: int, email: str) -> None:
     client = _redis_client()
     client.delete(_code_key(user_id, email))
+    client.delete(_fail_key(user_id, email))
