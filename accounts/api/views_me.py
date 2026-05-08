@@ -9,6 +9,10 @@ from accounts.api.serializers import (
     MeUpdateSerializer,
     NicknameAvailabilitySerializer,
 )
+from accounts.api.token_cookies import (
+    clear_refresh_cookie,
+    get_refresh_token_from_request,
+)
 from accounts.api.views_auth import blacklist_refresh_token
 from accounts.models import User
 
@@ -34,12 +38,13 @@ class WithdrawView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
-        blacklist_refresh_token(request.data.get("refresh"))
+        blacklist_refresh_token(get_refresh_token_from_request(request))
         request.user.soft_delete()
-        return Response(
+        response = Response(
             {"message": "회원 탈퇴가 완료되었습니다."},
             status=status.HTTP_200_OK,
         )
+        return clear_refresh_cookie(response)
 
 
 class NicknameAvailabilityView(APIView):

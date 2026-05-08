@@ -12,6 +12,47 @@ from accounts.models import SocialAccount
 User = get_user_model()
 
 
+class AuthCookieTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="cookie@example.com",
+            email="cookie@example.com",
+            password="Password123",
+            nickname="cookienick",
+            display_name="Cookie User",
+        )
+
+    def test_login_sets_http_only_refresh_cookie_without_body_refresh(self):
+        response = self.client.post(
+            reverse("login"),
+            {"email": "cookie@example.com", "password": "Password123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn("verimarka_refresh_token", response.cookies)
+        self.assertTrue(response.cookies["verimarka_refresh_token"]["httponly"])
+
+    def test_token_refresh_reads_refresh_cookie(self):
+        login_response = self.client.post(
+            reverse("login"),
+            {"email": "cookie@example.com", "password": "Password123"},
+            format="json",
+        )
+        self.client.cookies["verimarka_refresh_token"] = login_response.cookies[
+            "verimarka_refresh_token"
+        ].value
+
+        response = self.client.post(reverse("token_refresh"), {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertNotIn("refresh", response.data)
+
+
 class OAuthAccountLinkingTests(TestCase):
     def setUp(self):
         self.client = APIClient()

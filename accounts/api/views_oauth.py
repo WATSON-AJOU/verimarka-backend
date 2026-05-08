@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.api.serializers import MeSerializer
+from accounts.api.views_auth import build_auth_response
 from accounts.models import SocialAccount
 from accounts.services.apple_oauth import (
     AppleOAuthError,
@@ -211,14 +212,13 @@ def _get_or_create_social_user(
 def _build_oauth_response(user, created: bool):
     refresh = RefreshToken.for_user(user)
     serializer = MeSerializer(user).data
-    return Response(
-        {
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
+    return build_auth_response(
+        refresh=refresh,
+        payload={
             "user": serializer,
             "created": created,
         },
-        status=status.HTTP_200_OK,
+        status_code=status.HTTP_200_OK,
     )
 
 

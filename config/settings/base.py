@@ -148,6 +148,14 @@ REST_FRAMEWORK = {
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-request-id",
 ]
+CORS_ALLOW_CREDENTIALS = True
+
+JWT_REFRESH_COOKIE_NAME = env(
+    "JWT_REFRESH_COOKIE_NAME", default="verimarka_refresh_token"
+)
+JWT_REFRESH_COOKIE_PATH = env("JWT_REFRESH_COOKIE_PATH", default="/api/")
+JWT_REFRESH_COOKIE_SECURE = env.bool("JWT_REFRESH_COOKIE_SECURE", default=not DEBUG)
+JWT_REFRESH_COOKIE_SAMESITE = env("JWT_REFRESH_COOKIE_SAMESITE", default="Lax")
 
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
 GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
