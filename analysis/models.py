@@ -48,6 +48,22 @@ class AIJob(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["owner", "-created_at"], name="aijob_owner_created_idx"
+            ),
+            models.Index(
+                fields=["content", "job_type", "-created_at"],
+                name="aijob_content_type_created_idx",
+            ),
+            models.Index(
+                fields=["status", "-created_at"], name="aijob_status_created_idx"
+            ),
+            models.Index(
+                fields=["job_type", "status", "-created_at"],
+                name="aijob_type_status_created_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.job_type}:{self.public_id}:{self.status}"

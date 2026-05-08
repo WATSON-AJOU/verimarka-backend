@@ -28,7 +28,9 @@ class Content(models.Model):
         on_delete=models.CASCADE,
         related_name="contents",
     )
-    content_type = models.CharField(max_length=20, choices=CONTENT_TYPE_CHOICES, default="image")
+    content_type = models.CharField(
+        max_length=20, choices=CONTENT_TYPE_CHOICES, default="image"
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
 
     original_file = models.FileField(upload_to=content_upload_to)
@@ -57,6 +59,21 @@ class Content(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["owner", "-created_at"], name="content_owner_created_idx"
+            ),
+            models.Index(
+                fields=["owner", "source_sha256"], name="content_owner_sha_idx"
+            ),
+            models.Index(fields=["-updated_at"], name="content_updated_idx"),
+            models.Index(
+                fields=["decision", "-created_at"], name="content_decision_created_idx"
+            ),
+            models.Index(
+                fields=["status", "-created_at"], name="content_status_created_idx"
+            ),
+        ]
 
     def __str__(self):
         return f"{self.original_filename} ({self.status})"
@@ -88,6 +105,13 @@ class VoteParticipationLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="vote_user_created_idx"),
+            models.Index(
+                fields=["content", "-created_at"], name="vote_content_created_idx"
+            ),
+            models.Index(fields=["token_id"], name="vote_token_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["content", "user"],

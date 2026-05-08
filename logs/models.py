@@ -26,6 +26,14 @@ class VerificationHistoryLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["user", "-created_at"], name="verifylog_user_created_idx"
+            ),
+            models.Index(
+                fields=["outcome", "-created_at"], name="verifylog_outcome_created_idx"
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user_id}:{self.uploaded_file_name}:{self.outcome}"
