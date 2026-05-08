@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -7,6 +8,7 @@ env.read_env(BASE_DIR / ".env.prod")
 
 from .base import *  # noqa: E402,F403
 
+SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
