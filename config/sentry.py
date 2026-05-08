@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +37,16 @@ def init_sentry(
         if isinstance(request_data, dict):
             for key in list(request_data.keys()):
                 lowered = str(key).lower()
-                if any(token in lowered for token in ("password", "token", "secret", "authorization", "signature")):
+                if any(
+                    token in lowered
+                    for token in (
+                        "password",
+                        "token",
+                        "secret",
+                        "authorization",
+                        "signature",
+                    )
+                ):
                     request_data[key] = "***REDACTED***"
         return event
 
@@ -56,7 +64,11 @@ def init_sentry(
         before_send=before_send,
     )
 
-    logger.info("sentry.initialized environment=%s traces_sample_rate=%s", environment, traces_sample_rate)
+    logger.info(
+        "sentry.initialized environment=%s traces_sample_rate=%s",
+        environment,
+        traces_sample_rate,
+    )
 
 
 def capture_sentry_message(
@@ -71,7 +83,7 @@ def capture_sentry_message(
     except ModuleNotFoundError:
         return
 
-    with sentry_sdk.push_scope() as scope:
+    with sentry_sdk.new_scope() as scope:
         for key, value in (tags or {}).items():
             scope.set_tag(key, value)
         for key, value in (extra or {}).items():
