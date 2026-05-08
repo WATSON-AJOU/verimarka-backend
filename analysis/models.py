@@ -34,6 +34,8 @@ class AIJob(models.Model):
     job_type = models.CharField(max_length=20, choices=JOB_TYPE_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
     celery_task_id = models.CharField(max_length=255, blank=True)
+    progress = models.PositiveSmallIntegerField(default=0)
+    progress_message = models.CharField(max_length=100, blank=True)
     request_payload = models.JSONField(default=dict, blank=True)
     response_payload = models.JSONField(default=dict, blank=True)
     error_code = models.CharField(max_length=100, blank=True)

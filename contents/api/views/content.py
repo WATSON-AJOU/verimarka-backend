@@ -46,10 +46,13 @@ logger = logging.getLogger(__name__)
 def _build_async_job_response(
     job: AIJob, content: Content, request, *, status_code=status.HTTP_202_ACCEPTED
 ):
+    progress = 100 if job.status == "success" else job.progress
     return Response(
         {
             "job_id": str(job.public_id),
             "status": job.status,
+            "progress": progress,
+            "progress_message": job.progress_message,
             "content": ContentSerializer(content, context={"request": request}).data,
         },
         status=status_code,
@@ -159,6 +162,8 @@ class ContentRegisterView(APIView):
                         content=duplicate_content,
                         job_type="register",
                         status="success",
+                        progress=100,
+                        progress_message="동일 원본 파일 확인이 완료되었습니다.",
                         request_payload={
                             "duplicate_of": str(blocked_duplicate_source.public_id)
                         },
@@ -275,6 +280,8 @@ class ContentVerifyView(APIView):
             {
                 "job_id": str(job.public_id),
                 "status": job.status,
+                "progress": job.progress,
+                "progress_message": job.progress_message,
             },
             status=status.HTTP_202_ACCEPTED,
         )

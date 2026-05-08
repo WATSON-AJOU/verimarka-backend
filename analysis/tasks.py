@@ -14,6 +14,12 @@ from logs.models import VerificationHistoryLog
 logger = logging.getLogger(__name__)
 
 
+def _update_job_progress(job: AIJob, progress: int, message: str = "") -> None:
+    job.progress = max(0, min(progress, 100))
+    job.progress_message = message
+    job.save(update_fields=["progress", "progress_message", "updated_at"])
+
+
 def _mark_job_running(job: AIJob, task_id: str) -> None:
     logger.info(
         "analysis.job.running job_id=%s job_type=%s task_id=%s",
@@ -27,6 +33,8 @@ def _mark_job_running(job: AIJob, task_id: str) -> None:
     job.error_code = ""
     job.error_message = ""
     job.retryable = False
+    job.progress = max(job.progress, 10)
+    job.progress_message = "작업을 시작했습니다."
     job.save(
         update_fields=[
             "status",
@@ -35,6 +43,8 @@ def _mark_job_running(job: AIJob, task_id: str) -> None:
             "error_code",
             "error_message",
             "retryable",
+            "progress",
+            "progress_message",
             "updated_at",
         ]
     )
@@ -50,7 +60,18 @@ def _mark_job_success(job: AIJob, payload: dict) -> None:
     job.status = "success"
     job.response_payload = payload
     job.completed_at = timezone.now()
-    job.save(update_fields=["status", "response_payload", "completed_at", "updated_at"])
+    job.progress = 100
+    job.progress_message = "작업이 완료되었습니다."
+    job.save(
+        update_fields=[
+            "status",
+            "response_payload",
+            "completed_at",
+            "progress",
+            "progress_message",
+            "updated_at",
+        ]
+    )
 
 
 def _mark_job_failure(
@@ -90,17 +111,20 @@ def run_register_analysis_job(self, job_public_id: str) -> dict:
 
     try:
         if job.request_payload.get("content_type") == "document":
+            _update_job_progress(job, 25, "문서 등록 워크플로우를 요청하고 있습니다.")
             content = ContentRegistrationService.register_document(
                 content=job.content,
                 user=job.owner,
                 source_input=job.request_payload["source_input"],
             )
         else:
+            _update_job_progress(job, 25, "AI 유사도 분석을 요청하고 있습니다.")
             content = ContentRegistrationService.run_guard_for_content(
                 content=job.content,
                 user_id=job.owner_id,
                 source_input=job.request_payload["source_input"],
             )
+        _update_job_progress(job, 90, "분석 결과를 저장하고 있습니다.")
         payload = {"content_public_id": str(content.public_id)}
         _mark_job_success(job, payload)
         return payload
@@ -132,6 +156,7 @@ def run_verify_job(self, job_public_id: str) -> dict:
 
     try:
         user = get_user_model().objects.get(pk=job.owner_id)
+        _update_job_progress(job, 20, "검증 입력 파일을 준비하고 있습니다.")
         payload = ContentVerificationService.verify_from_source_input(
             user=user,
             upload_name=job.request_payload["upload_name"],
@@ -141,6 +166,7 @@ def run_verify_job(self, job_public_id: str) -> dict:
             source_input=job.request_payload["source_input"],
             uploaded_preview_url=job.request_payload.get("uploaded_preview_url"),
         )
+        _update_job_progress(job, 85, "검증 결과를 기록하고 있습니다.")
         uploaded = payload.get("uploaded") or {}
         source_input = job.request_payload.get("source_input") or {}
         VerificationHistoryLog.objects.create(
@@ -185,7 +211,9 @@ def run_watermark_job(self, job_public_id: str) -> dict:
     _mark_job_running(job, self.request.id)
 
     try:
+        _update_job_progress(job, 25, "워터마크 삽입을 요청하고 있습니다.")
         content = ContentWatermarkService.apply_watermark(content=job.content)
+        _update_job_progress(job, 90, "워터마크 결과를 저장하고 있습니다.")
         payload = {"content_public_id": str(content.public_id)}
         _mark_job_success(job, payload)
         return payload
