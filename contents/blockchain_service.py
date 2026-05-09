@@ -41,10 +41,13 @@ class ContentBlockchainService:
 
     @classmethod
     def mint(cls, *, content: Content) -> Content:
-        if content.decision != "allow":
+        mintable_decisions = (
+            {"allow", "verified"} if content.content_type == "document" else {"allow"}
+        )
+        if content.decision not in mintable_decisions:
             raise AIIntegrationError(
                 error_code="INVALID_STATE",
-                error_message="ALLOW 판정 콘텐츠만 NFT를 발행할 수 있습니다.",
+                error_message="등록 승인 판정 콘텐츠만 NFT를 발행할 수 있습니다.",
                 retryable=False,
                 status_code=400,
                 job_id=str(content.public_id),

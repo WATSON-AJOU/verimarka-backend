@@ -188,6 +188,8 @@ class ContentVerificationService:
         watermark = result.get("watermark") or {}
         detected = bool(watermark.get("detected"))
         payload_id = watermark.get("payload_id")
+        confidence = cls._extract_watermark_confidence(watermark)
+        best_page_number = cls._extract_watermark_best_page(watermark)
         if detected and payload_id:
             verified_payload = cls._build_verified_result(
                 user=user,
@@ -197,7 +199,7 @@ class ContentVerificationService:
                 detect_result={
                     "detected": True,
                     "payload_id": payload_id,
-                    "confidence": (watermark.get("best_page") or {}).get("confidence"),
+                    "confidence": confidence,
                     "bit_accuracy": None,
                     "model": "wam",
                     "model_version": None,
@@ -207,11 +209,10 @@ class ContentVerificationService:
                 verified_payload["uploaded"]["preview_url"] = None
                 verified_payload["detect"] = {
                     **verified_payload.get("detect", {}),
-                    "best_page": (watermark.get("best_page") or {}).get("page"),
+                    "best_page": best_page_number,
                 }
                 return verified_payload
 
-        best_page = watermark.get("best_page") or {}
         summary = "문서 워터마크를 찾지 못했습니다. 수동 검토가 필요합니다."
         if result.get("reason"):
             summary = result["reason"]
@@ -232,9 +233,9 @@ class ContentVerificationService:
             "detect": {
                 "detected": False,
                 "status_label": "확인 필요",
-                "confidence": best_page.get("confidence"),
+                "confidence": confidence,
                 "payload_id": payload_id,
-                "best_page": best_page.get("page"),
+                "best_page": best_page_number,
             },
             "candidate": {
                 "preview_url": None,
@@ -244,6 +245,36 @@ class ContentVerificationService:
                 "summary": summary,
             },
         }
+
+    @classmethod
+    def _extract_watermark_confidence(cls, watermark: dict) -> float | None:
+        confidence = watermark.get("confidence")
+        if isinstance(confidence, (int, float)):
+            return float(confidence)
+
+        best_page = watermark.get("best_page")
+        if isinstance(best_page, dict):
+            page_confidence = best_page.get("confidence")
+            if isinstance(page_confidence, (int, float)):
+                return float(page_confidence)
+
+        return None
+
+    @classmethod
+    def _extract_watermark_best_page(cls, watermark: dict) -> int | None:
+        best_page = watermark.get("best_page")
+        if isinstance(best_page, dict):
+            page = best_page.get("page")
+        else:
+            page = best_page
+
+        if isinstance(page, int):
+            return page
+        if isinstance(page, float) and page.is_integer():
+            return int(page)
+        if isinstance(page, str) and page.isdigit():
+            return int(page)
+        return None
 
     @classmethod
     def _build_verified_result(
@@ -274,7 +305,7 @@ class ContentVerificationService:
 
         content = (
             Content.objects.filter(
-                decision="allow",
+                decision__in=["allow", "verified"],
                 blockchain__wm_id=wm_id,
             )
             .select_related("owner")
@@ -476,12 +507,17 @@ class ContentVerificationService:
         return Path(temp_file.name)
 
     @classmethod
-    def _build_source_input(cls, *, temp_path: Path, upload) -> dict[str, str]:
+    def _build_source_input(
+        cls, *, temp_path: Path, upload, content_type_override: str | None = None
+    ) -> dict[str, str]:
         safe_name = sanitize_uploaded_filename(
             getattr(upload, "name", ""),
             mime_type=resolve_upload_mime_type(upload),
         )
         upload_content_type = resolve_upload_mime_type(upload)
+        content_type = content_type_override or resolve_content_type_from_mime(
+            upload_content_type
+        )
         if not S3StorageService.is_enabled():
             return {"url": str(temp_path.resolve())}
 
@@ -491,7 +527,7 @@ class ContentVerificationService:
             filename=safe_name,
             stage=(
                 settings.S3_PREFIX_DOC_VERIFY_REQUEST
-                if resolve_content_type_from_mime(upload_content_type) == "document"
+                if content_type == "document"
                 else "verify"
             ),
         )

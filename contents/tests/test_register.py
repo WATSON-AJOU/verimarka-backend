@@ -148,6 +148,139 @@ class ContentRegisterViewTests(TestCase):
     @patch("contents.api.services.registration.S3StorageService.upload_file")
     @patch(
         "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/scan.png",
+    )
+    @patch(
+        "contents.api.services.registration.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/document/register_request/1/test/scan.png",
+    )
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_scan_image_as_document_when_requested(
+        self, mocked_delay, *_mocks
+    ):
+        mocked_delay.return_value.id = "celery-task-scan-1"
+        upload = SimpleUploadedFile(
+            "scan.png",
+            b"\x89PNG\r\n\x1a\nscancontent",
+            content_type="image/png",
+        )
+
+        response = self.client.post(
+            reverse("content_register"),
+            {"file": upload, "content_type": "document"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        content = Content.objects.get()
+        job = AIJob.objects.get()
+        self.assertEqual(content.content_type, "document")
+        self.assertEqual(job.request_payload["content_type"], "document")
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.api.services.registration.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch(
+        "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/file.webp",
+    )
+    @patch(
+        "contents.api.services.registration.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/original/1/test/file.webp",
+    )
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_accepts_webp_image(self, mocked_delay, *_mocks):
+        mocked_delay.return_value.id = "celery-task-webp-1"
+        upload = SimpleUploadedFile(
+            "sample.webp", b"RIFFxxxxWEBPfake", content_type="image/webp"
+        )
+
+        response = self.client.post(
+            reverse("content_register"), {"file": upload}, format="multipart"
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(Content.objects.get().content_type, "image")
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.api.services.registration.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch(
+        "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/file.jpg",
+    )
+    @patch(
+        "contents.api.services.registration.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/original/1/test/file.jpg",
+    )
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_accepts_image_jpg_mime_type(self, mocked_delay, *_mocks):
+        mocked_delay.return_value.id = "celery-task-jpg-1"
+        upload = SimpleUploadedFile(
+            "sample.jpg", b"\xff\xd8\xff\xe0fakejpeg", content_type="image/jpg"
+        )
+
+        response = self.client.post(
+            reverse("content_register"), {"file": upload}, format="multipart"
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(Content.objects.get().mime_type, "image/jpg")
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.verification_service.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.verification_service.S3StorageService.upload_file")
+    @patch(
+        "contents.verification_service.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/scan.png",
+    )
+    @patch(
+        "contents.verification_service.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/document/verify_request/scan.png",
+    )
+    @patch(
+        "contents.verification_service.S3StorageService.build_content_key",
+        return_value="document/verify_request/scan.png",
+    )
+    @patch("analysis.tasks.run_verify_job.delay")
+    def test_verify_scan_image_as_document_when_requested(
+        self, mocked_delay, mocked_build_key, *_mocks
+    ):
+        mocked_delay.return_value.id = "celery-task-verify-scan-1"
+        upload = SimpleUploadedFile(
+            "scan.png",
+            b"\x89PNG\r\n\x1a\nscancontent",
+            content_type="image/png",
+        )
+
+        response = self.client.post(
+            reverse("content_verify"),
+            {"file": upload, "content_type": "document"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        job = AIJob.objects.get(job_type="verify")
+        self.assertEqual(job.request_payload["content_type"], "document")
+        mocked_build_key.assert_called_once()
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.api.services.registration.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch(
+        "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
         return_value="https://example.com/file.png",
     )
     @patch(

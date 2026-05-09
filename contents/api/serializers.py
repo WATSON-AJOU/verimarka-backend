@@ -2,8 +2,8 @@ from pathlib import Path
 
 from rest_framework import serializers
 
-from contents.models import Content
 from contents.input_safety import validate_uploaded_content_file
+from contents.models import Content
 from contents.storage import S3StorageService
 
 
@@ -53,7 +53,9 @@ class ContentSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.original_storage_key and S3StorageService.is_enabled():
-            return S3StorageService.generate_presigned_get_url(key=obj.original_storage_key)
+            return S3StorageService.generate_presigned_get_url(
+                key=obj.original_storage_key
+            )
 
         request = self.context.get("request")
         if not self._local_file_exists(obj.original_file):
@@ -89,6 +91,9 @@ class ContentSerializer(serializers.ModelSerializer):
 
 class ContentRegisterSerializer(serializers.Serializer):
     file = serializers.FileField()
+    content_type = serializers.ChoiceField(
+        choices=("image", "document"), required=False
+    )
 
     def validate_file(self, value):
         return validate_uploaded_content_file(value)
@@ -96,6 +101,9 @@ class ContentRegisterSerializer(serializers.Serializer):
 
 class ContentVerifySerializer(serializers.Serializer):
     file = serializers.FileField()
+    content_type = serializers.ChoiceField(
+        choices=("image", "document"), required=False
+    )
 
     def validate_file(self, value):
         return validate_uploaded_content_file(value)

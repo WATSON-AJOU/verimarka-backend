@@ -16,6 +16,7 @@ class Content(models.Model):
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
+        ("verified", "Verified"),
         ("allow", "Allow"),
         ("review", "Review"),
         ("block", "Block"),

@@ -8,6 +8,8 @@ MAX_IMAGE_BYTES = 30 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {
     "image/png": {".png"},
     "image/jpeg": {".jpg", ".jpeg"},
+    "image/jpg": {".jpg", ".jpeg"},
+    "image/webp": {".webp"},
 }
 ALLOWED_DOCUMENT_MIME_TYPES = {
     "application/pdf": {".pdf"},
@@ -35,9 +37,13 @@ MIME_TYPE_BY_EXTENSION = {
     for mime_type, extensions in ALLOWED_UPLOAD_MIME_TYPES.items()
     for ext in extensions
 }
+MIME_TYPE_BY_EXTENSION[".jpg"] = "image/jpeg"
+MIME_TYPE_BY_EXTENSION[".jpeg"] = "image/jpeg"
 FILE_SIGNATURES = {
     "image/png": (b"\x89PNG\r\n\x1a\n",),
     "image/jpeg": (b"\xff\xd8\xff",),
+    "image/jpg": (b"\xff\xd8\xff",),
+    "image/webp": (b"RIFF",),
     "application/pdf": (b"%PDF-",),
     "application/msword": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (

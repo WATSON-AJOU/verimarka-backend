@@ -126,6 +126,19 @@ def run_register_analysis_job(self, job_public_id: str) -> dict:
             )
         _update_job_progress(job, 90, "분석 결과를 저장하고 있습니다.")
         payload = {"content_public_id": str(content.public_id)}
+        if (
+            job.request_payload.get("content_type") == "document"
+            and content.decision == "failed"
+        ):
+            job.response_payload = payload
+            job.save(update_fields=["response_payload", "updated_at"])
+            _mark_job_failure(
+                job,
+                error_code="DOCUMENT_REGISTER_FAILED",
+                error_message=content.reason or "문서 등록 처리에 실패했습니다.",
+                retryable=False,
+            )
+            return payload
         _mark_job_success(job, payload)
         return payload
     except AIIntegrationError as exc:

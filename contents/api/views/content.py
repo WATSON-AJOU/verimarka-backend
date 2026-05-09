@@ -99,6 +99,12 @@ class ContentRegisterView(APIView):
         )
         upload_content_type = resolve_upload_mime_type(upload)
         resolved_content_type = resolve_content_type_from_mime(upload_content_type)
+        requested_content_type = serializer.validated_data.get("content_type")
+        effective_content_type = (
+            "document"
+            if requested_content_type == "document"
+            else resolved_content_type
+        )
         try:
             matching_contents = list(
                 Content.objects.filter(owner=request.user, source_sha256=source_sha256)
@@ -164,6 +170,7 @@ class ContentRegisterView(APIView):
                             source_sha256=source_sha256,
                             existing_content=blocked_duplicate_source,
                             temp_path=temp_path,
+                            content_type_override=effective_content_type,
                         )
                     )
                     duplicate_job = AIJob.objects.create(
@@ -191,6 +198,7 @@ class ContentRegisterView(APIView):
                 user=request.user,
                 upload=upload,
                 source_sha256=source_sha256,
+                content_type_override=effective_content_type,
             )
             source_input = ContentRegistrationService._build_source_input(
                 content, temp_path=temp_path
@@ -204,7 +212,7 @@ class ContentRegisterView(APIView):
             job_type="register",
             request_payload={
                 "source_input": source_input,
-                "content_type": resolved_content_type,
+                "content_type": effective_content_type,
             },
         )
         task = run_register_analysis_job.delay(str(job.public_id))
@@ -249,13 +257,21 @@ class ContentVerifyView(APIView):
 
         upload_content_type = resolve_upload_mime_type(upload)
         resolved_content_type = resolve_content_type_from_mime(upload_content_type)
+        requested_content_type = serializer.validated_data.get("content_type")
+        effective_content_type = (
+            "document"
+            if requested_content_type == "document"
+            else resolved_content_type
+        )
         upload_name = normalize_uploaded_filename(
             getattr(upload, "name", ""), mime_type=upload_content_type
         )
         temp_path = ContentVerificationService._write_temp_file(upload)
         try:
             source_input = ContentVerificationService._build_source_input(
-                temp_path=temp_path, upload=upload
+                temp_path=temp_path,
+                upload=upload,
+                content_type_override=effective_content_type,
             )
         finally:
             temp_path.unlink(missing_ok=True)
@@ -268,9 +284,9 @@ class ContentVerifyView(APIView):
                 "upload_name": upload_name,
                 "upload_size": upload.size,
                 "upload_content_type": upload_content_type,
-                "content_type": resolved_content_type,
+                "content_type": effective_content_type,
                 "uploaded_preview_url": source_input.get("url")
-                if resolved_content_type == "image"
+                if effective_content_type == "image"
                 else None,
             },
         )

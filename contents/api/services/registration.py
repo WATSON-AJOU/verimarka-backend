@@ -11,6 +11,8 @@ from analysis.api.services import AnalysisGuardService
 from analysis.contracts import GuardRequestV1
 from contents.document_service import ContentDocumentAIService
 from contents.input_safety import (
+    ALLOWED_DOCUMENT_MIME_TYPES,
+    ALLOWED_IMAGE_MIME_TYPES,
     normalize_uploaded_filename,
     resolve_content_type_from_mime,
     resolve_upload_mime_type,
@@ -83,10 +85,21 @@ class ContentRegistrationService:
 
     @classmethod
     def create_pending_content(
-        cls, *, user, upload, source_sha256: str = ""
+        cls,
+        *,
+        user,
+        upload,
+        source_sha256: str = "",
+        content_type_override: str | None = None,
     ) -> Content:
         mime_type = resolve_upload_mime_type(upload)
-        content_type = resolve_content_type_from_mime(mime_type)
+        content_type = content_type_override or resolve_content_type_from_mime(
+            mime_type
+        )
+        if content_type == "document" and mime_type not in (
+            ALLOWED_DOCUMENT_MIME_TYPES | ALLOWED_IMAGE_MIME_TYPES
+        ):
+            content_type = resolve_content_type_from_mime(mime_type)
         display_filename = normalize_uploaded_filename(
             getattr(upload, "name", ""),
             mime_type=mime_type,
@@ -121,9 +134,13 @@ class ContentRegistrationService:
         source_sha256: str,
         existing_content: Content,
         temp_path: Path | None = None,
+        content_type_override: str | None = None,
     ) -> Content:
         content = cls.create_pending_content(
-            user=user, upload=upload, source_sha256=source_sha256
+            user=user,
+            upload=upload,
+            source_sha256=source_sha256,
+            content_type_override=content_type_override,
         )
         if temp_path is not None:
             try:
@@ -189,8 +206,8 @@ class ContentRegistrationService:
         raw_decision = result.get("decision") or "failed"
 
         if raw_decision == "verified":
-            content.status = "allow"
-            content.decision = "allow"
+            content.status = "verified"
+            content.decision = "verified"
             content.reason = result.get("reason") or "문서 등록 처리가 완료되었습니다."
             content.next_action = "none"
         elif raw_decision == "review":
@@ -199,8 +216,8 @@ class ContentRegistrationService:
             content.reason = result.get("reason") or "문서 확인이 필요합니다."
             content.next_action = "start_vote"
         else:
-            content.status = "block"
-            content.decision = "block"
+            content.status = "failed"
+            content.decision = "failed"
             content.reason = result.get("reason") or "문서 등록 처리에 실패했습니다."
             content.next_action = "none"
 
