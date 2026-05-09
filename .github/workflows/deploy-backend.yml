@@ -122,6 +122,8 @@ jobs:
         run: |
           ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH:-main}' HEALTHCHECK_URL='${HEALTHCHECK_URL:-https://verimarka.com/api/health/}' HEALTHCHECK_RETRIES='${HEALTHCHECK_RETRIES:-30}' HEALTHCHECK_INTERVAL_SECONDS='${HEALTHCHECK_INTERVAL_SECONDS:-5}'; bash -s" <<'EOF'
           set -euo pipefail
+          export DOCKER_BUILDKIT=1
+          export COMPOSE_DOCKER_CLI_BUILD=1
 
           rollback_executed=0
 

@@ -1,9 +1,16 @@
+x-verimarka-backend-image: &verimarka-backend-image
+  image: verimarka-backend:${VERIMARKA_BACKEND_IMAGE_TAG:-latest}
+
+x-verimarka-backend-build: &verimarka-backend-build
+  context: ..
+  dockerfile: verimarka-BACKEND/Dockerfile
+
 services:
   verimarka-api:
-    container_name: verimarka-api
+    <<: *verimarka-backend-image
     build:
-      context: ..
-      dockerfile: verimarka-BACKEND/Dockerfile
+      <<: *verimarka-backend-build
+    container_name: verimarka-api
     depends_on:
       redis:
         condition: service_healthy
@@ -20,10 +27,8 @@ services:
     restart: unless-stopped
 
   verimarka-celery:
+    <<: *verimarka-backend-image
     container_name: verimarka-celery
-    build:
-      context: ..
-      dockerfile: verimarka-BACKEND/Dockerfile
     depends_on:
       redis:
         condition: service_healthy
