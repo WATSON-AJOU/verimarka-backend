@@ -8,10 +8,13 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        fontconfig \
+        fonts-noto-cjk \
         gcc \
         g++ \
         libgl1 \
         libglib2.0-0 \
+        libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 COPY verimarka-BACKEND/requirements.txt /tmp/backend-requirements.txt
