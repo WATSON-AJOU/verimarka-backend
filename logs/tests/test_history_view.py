@@ -141,6 +141,58 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(allow_item["summary"], "등록 승인 완료")
         self.assertIsNone(allow_item["download_url"])
 
+    def test_verified_document_history_is_success_not_blocked(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="document",
+            status="verified",
+            decision="verified",
+            original_file="",
+            original_filename="contract.docx",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_size=123,
+            reason="document watermarked and OCR summary extracted",
+            watermark={
+                "applied": True,
+                "output_key": "document/watermarked/contract.pdf",
+            },
+            blockchain={
+                "minted": True,
+                "mint_kind": "content",
+                "network_name": "Sepolia",
+                "token_id": 6,
+            },
+        )
+
+        response = self.client.get(reverse("analysis_history"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()[0]
+        self.assertEqual(payload["type"], "verified")
+        self.assertEqual(payload["summary"], "워터마크 & 토큰 발급 완료 (토큰 #6)")
+        self.assertEqual(payload["extra"], "Sepolia · Token #6")
+        self.assertNotEqual(payload["summary"], "등록 차단")
+
+    def test_failed_document_history_is_block_type(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="document",
+            status="failed",
+            decision="failed",
+            original_file="",
+            original_filename="broken-contract.docx",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_size=123,
+            reason="문서 등록 처리에 실패했습니다.",
+        )
+
+        response = self.client.get(reverse("analysis_history"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()[0]
+        self.assertEqual(payload["type"], "block")
+        self.assertEqual(payload["summary"], "등록 차단")
+
     def test_content_mint_after_review_approval_keeps_review_result_history(self):
         Content.objects.create(
             owner=self.user,

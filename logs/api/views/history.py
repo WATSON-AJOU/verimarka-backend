@@ -178,10 +178,12 @@ class AnalysisHistoryView(APIView):
                 "blockchain": blockchain,
                 "sort_key": content.created_at,
             }
-        if content.decision == "allow":
+        if content.decision in {"allow", "verified"}:
             summary = (
                 f"워터마크 & 토큰 발급 완료 (토큰 #{token_id})"
                 if minted and token_id
+                else "문서 워터마크 등록 완료"
+                if content.decision == "verified" and watermark_applied
                 else "워터마크 삽입 완료"
                 if watermark_applied
                 else "등록 승인 완료"
@@ -191,6 +193,8 @@ class AnalysisHistoryView(APIView):
                 if minted and token_id
                 else "토큰 발행 대기"
                 if watermark_applied
+                else content.reason
+                if content.decision == "verified" and content.reason
                 else "등록 승인됨"
             )
             comparison_preview_url = watermark_preview_url
@@ -199,7 +203,7 @@ class AnalysisHistoryView(APIView):
             comparison_label = "워터마크 결과"
             item = {
                 "id": str(content.public_id),
-                "type": "allow",
+                "type": content.decision,
                 "file_name": content.original_filename,
                 "summary": summary,
                 "timestamp": format_datetime(content.created_at),
@@ -245,9 +249,13 @@ class AnalysisHistoryView(APIView):
             )
             comparison_label = "유사 후보"
 
+        item_type = (
+            "block" if content.decision == "failed" else content.decision or "block"
+        )
+
         item = {
             "id": str(content.public_id),
-            "type": content.decision or "block",
+            "type": item_type,
             "file_name": content.original_filename,
             "summary": summary,
             "timestamp": format_datetime(content.created_at),
