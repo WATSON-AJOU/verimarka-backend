@@ -129,6 +129,23 @@ class OAuthAccountLinkingTests(TestCase):
         mock_exchange.assert_not_called()
 
     @patch("accounts.api.views_oauth.exchange_code_for_token")
+    def test_google_oauth_allows_www_frontend_redirect_uri(self, mock_exchange):
+        mock_exchange.return_value = {}
+
+        response = self.client.post(
+            reverse("oauth_google"),
+            {
+                "code": "google-auth-code",
+                "redirect_uri": "https://www.verimarka.com/auth/google/callback",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("redirect_uri", response.data["detail"])
+        mock_exchange.assert_called_once()
+
+    @patch("accounts.api.views_oauth.exchange_code_for_token")
     def test_google_oauth_provider_error_is_sanitized(self, mock_exchange):
         mock_exchange.side_effect = GoogleOAuthError(
             "token_exchange_failed: 400 secret-token-provider-response"
