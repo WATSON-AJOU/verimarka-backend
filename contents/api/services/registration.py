@@ -19,6 +19,11 @@ from contents.input_safety import (
     sanitize_uploaded_filename,
 )
 from contents.models import Content
+from contents.preview_service import (
+    create_pdf_first_page_preview,
+    is_pdf_file,
+    resolve_content_document_preview_url,
+)
 from contents.storage import S3StorageService
 
 logger = logging.getLogger(__name__)
@@ -236,6 +241,7 @@ class ContentRegistrationService:
             "pending_actions": result.get("pending_actions") or [],
         }
         content.document_metadata = {
+            **(content.document_metadata or {}),
             "document_type": result.get("document_type")
             or getattr(settings, "DOC_DEFAULT_TYPE", "labor_contract_std_v1"),
             "ocr_summary": ocr_summary,
@@ -341,6 +347,22 @@ class ContentRegistrationService:
     def _build_source_input(
         cls, content: Content, *, temp_path: Path
     ) -> dict[str, str]:
+        if content.content_type == "document" and is_pdf_file(
+            mime_type=content.mime_type, filename=content.original_filename
+        ):
+            preview = create_pdf_first_page_preview(
+                source_path=temp_path,
+                owner_id=content.owner_id,
+                content_public_id=str(content.public_id),
+                filename=content.original_filename,
+            )
+            if preview:
+                content.document_metadata = {
+                    **(content.document_metadata or {}),
+                    "preview": preview,
+                }
+                content.save(update_fields=["document_metadata", "updated_at"])
+
         if not S3StorageService.is_enabled():
             resolved_path = str(temp_path.resolve())
             logger.info(
@@ -419,6 +441,11 @@ class ContentRegistrationService:
     def _resolve_content_image_url(cls, content: Content | None) -> str | None:
         if not content:
             return None
+
+        if content.content_type == "document":
+            preview_url = resolve_content_document_preview_url(content)
+            if preview_url:
+                return preview_url
 
         watermark = content.watermark or {}
         output_key = watermark.get("output_key")

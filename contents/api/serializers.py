@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from contents.input_safety import validate_uploaded_content_file
 from contents.models import Content
+from contents.preview_service import resolve_content_document_preview_url
 from contents.storage import S3StorageService
 
 
@@ -52,18 +53,31 @@ class ContentSerializer(serializers.ModelSerializer):
             return False
 
     def get_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.content_type == "document":
+            preview_url = resolve_content_document_preview_url(obj, request=request)
+            if preview_url:
+                return preview_url
+
         if obj.original_storage_key and S3StorageService.is_enabled():
             return S3StorageService.generate_presigned_get_url(
                 key=obj.original_storage_key
             )
 
-        request = self.context.get("request")
         if not self._local_file_exists(obj.original_file):
             return None
         url = obj.original_file.url
         return request.build_absolute_uri(url) if request else url
 
     def get_watermark_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.content_type == "document":
+            preview_url = resolve_content_document_preview_url(
+                obj, request=request, prefer_watermark=True
+            )
+            if preview_url:
+                return preview_url
+
         watermark = obj.watermark or {}
         output_key = watermark.get("output_key")
         output_url = watermark.get("output_url")
@@ -85,7 +99,6 @@ class ContentSerializer(serializers.ModelSerializer):
             except (TypeError, OSError):
                 return None
 
-        request = self.context.get("request")
         return request.build_absolute_uri(output_url) if request else output_url
 
 

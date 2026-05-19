@@ -210,6 +210,8 @@ class ContentRegisterView(APIView):
             owner=request.user,
             content=content,
             job_type="register",
+            progress=5,
+            progress_message="등록 작업이 대기열에 추가되었습니다.",
             request_payload={
                 "source_input": source_input,
                 "content_type": effective_content_type,
@@ -279,15 +281,20 @@ class ContentVerifyView(APIView):
         job = AIJob.objects.create(
             owner=request.user,
             job_type="verify",
+            progress=5,
+            progress_message="검증 작업이 대기열에 추가되었습니다.",
             request_payload={
                 "source_input": source_input,
                 "upload_name": upload_name,
                 "upload_size": upload.size,
                 "upload_content_type": upload_content_type,
                 "content_type": effective_content_type,
-                "uploaded_preview_url": source_input.get("url")
-                if effective_content_type == "image"
-                else None,
+                "uploaded_preview_url": source_input.get("preview_url")
+                or (
+                    source_input.get("url")
+                    if effective_content_type == "image"
+                    else None
+                ),
             },
         )
         task = run_verify_job.delay(str(job.public_id))
@@ -362,6 +369,8 @@ class ContentWatermarkView(APIView):
             owner=request.user,
             content=content,
             job_type="watermark",
+            progress=5,
+            progress_message="워터마크 작업이 대기열에 추가되었습니다.",
             request_payload={"content_public_id": str(content.public_id)},
         )
         task = run_watermark_job.delay(str(job.public_id))

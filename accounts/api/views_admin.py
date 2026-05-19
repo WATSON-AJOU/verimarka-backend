@@ -124,6 +124,12 @@ def _admin_update_guard(request, user: User, validated_data: dict) -> Response |
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    if role is not None and not request.user.is_superuser:
+        return Response(
+            {"detail": "관리자 권한 변경은 최고 관리자만 수행할 수 있습니다."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     if removes_admin_access and _active_admin_count() <= 1:
         return Response(
             {"detail": "마지막 활성 관리자 계정은 변경할 수 없습니다."},
@@ -410,6 +416,7 @@ def _serialize_user_detail(
 
 def _serialize_image_list_item(content: Content, request) -> dict:
     preview_url, _ = _content_preview_urls(content, request)
+    latest_job = content.ai_jobs.order_by("-created_at").first()
     return {
         "public_id": str(content.public_id),
         "content_type": content.content_type,
@@ -419,11 +426,13 @@ def _serialize_image_list_item(content: Content, request) -> dict:
         "decision": _image_decision_label(content),
         "vote_status": _vote_status_label(content),
         "preview_url": preview_url,
+        "latest_job": _serialize_job_summary(latest_job),
     }
 
 
 def _serialize_image_detail(content: Content, request) -> dict:
     preview_url, watermark_preview_url = _content_preview_urls(content, request)
+    latest_job = content.ai_jobs.order_by("-created_at").first()
     blockchain = content.blockchain or {}
     vote = blockchain.get("vote") or {}
     candidate = content.top_match or ((content.candidates or [None])[0] or {})
@@ -525,6 +534,20 @@ def _serialize_image_detail(content: Content, request) -> dict:
             if blockchain.get("mint_kind") == "review_vote"
             else _image_decision_label(content),
         },
+        "latest_job": _serialize_job_summary(latest_job),
+    }
+
+
+def _serialize_job_summary(job: AIJob | None) -> dict | None:
+    if job is None:
+        return None
+    return {
+        "job_id": str(job.public_id),
+        "job_type": job.job_type,
+        "status": job.status,
+        "progress": 100 if job.status == "success" else job.progress,
+        "progress_message": job.progress_message,
+        "updated_at": _format_dt(job.updated_at),
     }
 
 
@@ -700,7 +723,11 @@ class AdminUserDetailView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, user_id: int):
-        user = get_object_or_404(User.objects.select_related("wallet_link"), pk=user_id)
+        user = get_object_or_404(
+            User.objects.select_related("wallet_link"),
+            pk=user_id,
+            is_deleted=False,
+        )
         try:
             activity_page = max(1, int(request.query_params.get("page", "1")))
         except ValueError:
@@ -719,7 +746,11 @@ class AdminUserDetailView(APIView):
         return Response(AdminUserDetailSerializer(payload).data)
 
     def patch(self, request, user_id: int):
-        user = get_object_or_404(User.objects.select_related("wallet_link"), pk=user_id)
+        user = get_object_or_404(
+            User.objects.select_related("wallet_link"),
+            pk=user_id,
+            is_deleted=False,
+        )
         serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         guard_response = _admin_update_guard(request, user, serializer.validated_data)

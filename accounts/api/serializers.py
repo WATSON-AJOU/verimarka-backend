@@ -97,8 +97,10 @@ class AdminUserUpdateSerializer(serializers.Serializer):
         if role is not None:
             is_admin = role == "관리자"
             instance.is_staff = is_admin
-            instance.is_superuser = is_admin
-            update_fields.extend(["is_staff", "is_superuser"])
+            update_fields.append("is_staff")
+            if not is_admin and instance.is_superuser:
+                instance.is_superuser = False
+                update_fields.append("is_superuser")
 
         if status is not None:
             instance.is_active = status == "정상"
@@ -154,8 +156,12 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         if len(display_name) > 20:
             raise serializers.ValidationError("표시명은 20자 이하로 입력해주세요.")
         if not re.fullmatch(DISPLAY_NAME_PATTERN, display_name):
-            raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
-        queryset = User.objects.filter(display_name=display_name).exclude(id=self.instance.id)
+            raise serializers.ValidationError(
+                "표시명에는 특수문자를 포함할 수 없습니다."
+            )
+        queryset = User.objects.filter(display_name=display_name).exclude(
+            id=self.instance.id
+        )
         if queryset.exists():
             raise serializers.ValidationError("이미 사용 중인 표시명입니다.")
         return display_name
@@ -167,7 +173,9 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         if len(nickname) > 30:
             raise serializers.ValidationError("닉네임은 30자 이하로 입력해주세요.")
         if not re.fullmatch(NICKNAME_PATTERN, nickname):
-            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
+            raise serializers.ValidationError(
+                "닉네임에는 특수문자를 포함할 수 없습니다."
+            )
         queryset = User.objects.filter(nickname=nickname).exclude(id=self.instance.id)
         if queryset.exists():
             raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
@@ -232,8 +240,13 @@ class SignupSerializer(serializers.ModelSerializer):
         if len(nickname) > 30:
             raise serializers.ValidationError("닉네임은 30자 이하로 입력해주세요.")
         if not re.fullmatch(NICKNAME_PATTERN, nickname):
-            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
-        if User.objects.filter(nickname=nickname).exists() or User.objects.filter(username=nickname).exists():
+            raise serializers.ValidationError(
+                "닉네임에는 특수문자를 포함할 수 없습니다."
+            )
+        if (
+            User.objects.filter(nickname=nickname).exists()
+            or User.objects.filter(username=nickname).exists()
+        ):
             raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
         return nickname
 
@@ -259,9 +272,13 @@ class SignupSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if not attrs.get("terms_agreed"):
-            raise serializers.ValidationError({"terms_agreed": "이용약관 동의가 필요합니다."})
+            raise serializers.ValidationError(
+                {"terms_agreed": "이용약관 동의가 필요합니다."}
+            )
         if not attrs.get("privacy_agreed"):
-            raise serializers.ValidationError({"privacy_agreed": "개인정보 처리방침 동의가 필요합니다."})
+            raise serializers.ValidationError(
+                {"privacy_agreed": "개인정보 처리방침 동의가 필요합니다."}
+            )
         return attrs
 
     def create(self, validated_data):
@@ -289,7 +306,13 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("이메일과 비밀번호를 입력해주세요.")
         user = authenticate(username=email, password=password)
         if user is None:
-            raise serializers.ValidationError("이메일 또는 비밀번호가 올바르지 않습니다.")
+            raise serializers.ValidationError(
+                "이메일 또는 비밀번호가 올바르지 않습니다."
+            )
+        if user.is_deleted:
+            raise serializers.ValidationError(
+                "탈퇴한 계정입니다. 고객센터로 문의해주세요."
+            )
         if not user.is_active:
             raise serializers.ValidationError("정지된 계정입니다.")
         attrs["user"] = user
@@ -316,7 +339,9 @@ class NicknameAvailabilitySerializer(serializers.Serializer):
         if len(nickname) > 30:
             raise serializers.ValidationError("닉네임은 30자 이하로 입력해주세요.")
         if not re.fullmatch(NICKNAME_PATTERN, nickname):
-            raise serializers.ValidationError("닉네임에는 특수문자를 포함할 수 없습니다.")
+            raise serializers.ValidationError(
+                "닉네임에는 특수문자를 포함할 수 없습니다."
+            )
         return nickname
 
 
@@ -330,5 +355,7 @@ class DisplayNameAvailabilitySerializer(serializers.Serializer):
         if len(display_name) > 20:
             raise serializers.ValidationError("표시명은 20자 이하로 입력해주세요.")
         if not re.fullmatch(DISPLAY_NAME_PATTERN, display_name):
-            raise serializers.ValidationError("표시명에는 특수문자를 포함할 수 없습니다.")
+            raise serializers.ValidationError(
+                "표시명에는 특수문자를 포함할 수 없습니다."
+            )
         return display_name

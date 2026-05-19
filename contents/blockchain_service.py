@@ -30,6 +30,7 @@ class ContentBlockchainService:
     _blockchain_class = None
     _vector_upsert_callable = None
     REVIEW_THRESHOLD = 0.75
+    REVIEW_VOTE_DURATION_SECONDS = 72 * 60 * 60
     REVIEW_VOTE_SIGNATURE_TTL_SECONDS = 10 * 60
 
     NETWORK_NAME_BY_CHAIN_ID = {
@@ -387,6 +388,10 @@ class ContentBlockchainService:
             token_id = verification["token_id"]
             token_info = blockchain.get_document_info(token_id)
             end_time = token_info.get("end_time") or 0
+            if not end_time and token_info.get("timestamp"):
+                end_time = (
+                    int(token_info.get("timestamp")) + cls.REVIEW_VOTE_DURATION_SECONDS
+                )
             status_name = (
                 token_info.get("status") or verification.get("status") or "Pending"
             )
@@ -1297,8 +1302,18 @@ class ContentBlockchainService:
     ) -> dict[str, Any]:
         upvotes = int(token_info.get("upvotes") or 0)
         downvotes = int(token_info.get("downvotes") or 0)
+        participant_count = upvotes + downvotes
+        upvote_rate = (
+            round((upvotes / participant_count) * 100) if participant_count else 0
+        )
+        downvote_rate = 100 - upvote_rate if participant_count else 0
         started_at = cls._from_unix(token_info.get("timestamp"))
-        end_time = cls._from_unix(token_info.get("end_time"))
+        end_time_raw = token_info.get("end_time") or 0
+        if not end_time_raw and token_info.get("timestamp"):
+            end_time_raw = (
+                int(token_info.get("timestamp")) + cls.REVIEW_VOTE_DURATION_SECONDS
+            )
+        end_time = cls._from_unix(end_time_raw)
         finalized_at = (
             timezone.now() if status_name in {"Approved", "Rejected"} else None
         )
@@ -1312,7 +1327,10 @@ class ContentBlockchainService:
             "status": status_name,
             "upvotes": upvotes,
             "downvotes": downvotes,
-            "participant_count": upvotes + downvotes,
+            "participant_count": participant_count,
+            "has_votes": participant_count > 0,
+            "upvote_rate": upvote_rate,
+            "downvote_rate": downvote_rate,
             "started_at": started_at.isoformat() if started_at else None,
             "started_at_display": cls._format_dt(started_at),
             "end_time": end_time.isoformat() if end_time else None,

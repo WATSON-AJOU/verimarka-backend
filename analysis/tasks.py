@@ -90,6 +90,7 @@ def _mark_job_failure(
     job.error_message = error_message
     job.retryable = retryable
     job.completed_at = timezone.now()
+    job.progress_message = error_message or "작업이 실패했습니다."
     job.save(
         update_fields=[
             "status",
@@ -97,6 +98,7 @@ def _mark_job_failure(
             "error_message",
             "retryable",
             "completed_at",
+            "progress_message",
             "updated_at",
         ]
     )
@@ -111,14 +113,19 @@ def run_register_analysis_job(self, job_public_id: str) -> dict:
 
     try:
         if job.request_payload.get("content_type") == "document":
-            _update_job_progress(job, 25, "문서 등록 워크플로우를 요청하고 있습니다.")
+            _update_job_progress(job, 20, "문서 등록 입력을 검증하고 있습니다.")
+            _update_job_progress(job, 35, "문서 등록 워크플로우를 요청하고 있습니다.")
             content = ContentRegistrationService.register_document(
                 content=job.content,
                 user=job.owner,
                 source_input=job.request_payload["source_input"],
             )
+            _update_job_progress(
+                job, 78, "문서 워터마크 및 OCR 결과를 반영하고 있습니다."
+            )
         else:
-            _update_job_progress(job, 25, "AI 유사도 분석을 요청하고 있습니다.")
+            _update_job_progress(job, 20, "이미지 분석 입력을 검증하고 있습니다.")
+            _update_job_progress(job, 35, "AI 유사도 분석을 요청하고 있습니다.")
             content = ContentRegistrationService.run_guard_for_content(
                 content=job.content,
                 user_id=job.owner_id,
@@ -169,7 +176,7 @@ def run_verify_job(self, job_public_id: str) -> dict:
 
     try:
         user = get_user_model().objects.get(pk=job.owner_id)
-        _update_job_progress(job, 20, "검증 입력 파일을 준비하고 있습니다.")
+        _update_job_progress(job, 18, "검증 입력 파일을 준비하고 있습니다.")
         payload = ContentVerificationService.verify_from_source_input(
             user=user,
             upload_name=job.request_payload["upload_name"],
@@ -178,6 +185,9 @@ def run_verify_job(self, job_public_id: str) -> dict:
             content_type=job.request_payload.get("content_type", "image"),
             source_input=job.request_payload["source_input"],
             uploaded_preview_url=job.request_payload.get("uploaded_preview_url"),
+            progress_callback=lambda progress, message: _update_job_progress(
+                job, progress, message
+            ),
         )
         _update_job_progress(job, 85, "검증 결과를 기록하고 있습니다.")
         uploaded = payload.get("uploaded") or {}

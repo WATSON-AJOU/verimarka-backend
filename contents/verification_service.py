@@ -20,6 +20,11 @@ from .input_safety import (
     sanitize_uploaded_filename,
 )
 from .models import Content
+from .preview_service import (
+    create_pdf_first_page_preview,
+    is_pdf_file,
+    resolve_content_document_preview_url,
+)
 from .storage import S3StorageService
 
 logger = logging.getLogger(__name__)
@@ -63,17 +68,25 @@ class ContentVerificationService:
         source_input: dict[str, str],
         temp_path: Path | None = None,
         uploaded_preview_url: str | None = None,
+        progress_callback=None,
     ) -> dict:
+        def report(progress: int, message: str) -> None:
+            if progress_callback is not None:
+                progress_callback(progress, message)
+
         upload_name = normalize_uploaded_filename(
             upload_name, mime_type=upload_content_type
         )
         if content_type == "document":
+            report(35, "문서 워터마크 검증 워크플로우를 요청하고 있습니다.")
             return cls._verify_document_from_source_input(
                 user=user,
                 upload_name=upload_name,
                 upload_size=upload_size,
                 upload_content_type=upload_content_type,
                 source_input=source_input,
+                uploaded_preview_url=uploaded_preview_url,
+                progress_callback=progress_callback,
             )
         verify_job_id = f"verify-{timezone.now().timestamp()}"
         logger.info(
@@ -86,6 +99,7 @@ class ContentVerificationService:
                 "mime_type": upload_content_type,
             },
         )
+        report(35, "워터마크 검출을 요청하고 있습니다.")
         detect_response = WatermarkAIService.detect(
             {
                 "job_id": verify_job_id,
@@ -102,6 +116,7 @@ class ContentVerificationService:
         )
 
         detect_result = detect_response.get("result", {})
+        report(58, "워터마크 검출 결과를 해석하고 있습니다.")
         logger.info(
             "contents.verify.detect_response user_id=%s job_id=%s success=%s detected=%s payload_id=%s confidence=%s bit_accuracy=%s reason=%s",
             getattr(user, "id", None),
@@ -114,6 +129,7 @@ class ContentVerificationService:
             detect_response.get("reason"),
         )
         if detect_response.get("success") and detect_result.get("detected"):
+            report(72, "블록체인 등록 정보를 조회하고 있습니다.")
             verified_payload = cls._build_verified_result(
                 user=user,
                 upload_name=upload_name,
@@ -134,6 +150,7 @@ class ContentVerificationService:
                         )
                     ),
                 )
+                report(82, "검증 성공 결과를 구성하고 있습니다.")
                 return verified_payload
             logger.info(
                 "contents.verify.detect_unresolved user_id=%s job_id=%s payload_id=%s",
@@ -148,7 +165,8 @@ class ContentVerificationService:
             verify_job_id,
             "watermark_not_detected_or_not_resolved",
         )
-        return cls._build_candidate_result(
+        report(72, "유사 후보를 탐색하고 있습니다.")
+        result = cls._build_candidate_result(
             user=user,
             upload_name=upload_name,
             upload_size=upload_size,
@@ -156,6 +174,8 @@ class ContentVerificationService:
             source_input=source_input,
             uploaded_preview_url=uploaded_preview_url or source_input.get("url"),
         )
+        report(82, "검증 후보 결과를 구성하고 있습니다.")
+        return result
 
     @classmethod
     def _verify_document_from_source_input(
@@ -166,7 +186,13 @@ class ContentVerificationService:
         upload_size: int,
         upload_content_type: str,
         source_input: dict[str, str],
+        uploaded_preview_url: str | None = None,
+        progress_callback=None,
     ) -> dict:
+        def report(progress: int, message: str) -> None:
+            if progress_callback is not None:
+                progress_callback(progress, message)
+
         verify_job_id = f"verify-{timezone.now().timestamp()}"
         result = ContentDocumentAIService.run_verify_workflow_v1(
             {
@@ -185,12 +211,14 @@ class ContentVerificationService:
             }
         )
 
+        report(62, "문서 워터마크 결과를 해석하고 있습니다.")
         watermark = result.get("watermark") or {}
         detected = bool(watermark.get("detected"))
         payload_id = watermark.get("payload_id")
         confidence = cls._extract_watermark_confidence(watermark)
         best_page_number = cls._extract_watermark_best_page(watermark)
         if detected and payload_id:
+            report(74, "문서 블록체인 등록 정보를 조회하고 있습니다.")
             verified_payload = cls._build_verified_result(
                 user=user,
                 upload_name=upload_name,
@@ -206,13 +234,15 @@ class ContentVerificationService:
                 },
             )
             if verified_payload:
-                verified_payload["uploaded"]["preview_url"] = None
+                verified_payload["uploaded"]["preview_url"] = uploaded_preview_url
                 verified_payload["detect"] = {
                     **verified_payload.get("detect", {}),
                     "best_page": best_page_number,
                 }
+                report(82, "문서 검증 성공 결과를 구성하고 있습니다.")
                 return verified_payload
 
+        report(82, "문서 검증 결과를 구성하고 있습니다.")
         summary = "문서 워터마크를 찾지 못했습니다. 수동 검토가 필요합니다."
         if result.get("reason"):
             summary = result["reason"]
@@ -224,7 +254,7 @@ class ContentVerificationService:
             "uploaded": {
                 "file_name": upload_name,
                 "file_size": upload_size,
-                "preview_url": None,
+                "preview_url": uploaded_preview_url,
                 "verified_at": timezone.localtime().strftime("%Y.%m.%d %H:%M"),
                 "verifier_name": getattr(user, "display_name", "")
                 or getattr(user, "nickname", "")
@@ -521,6 +551,17 @@ class ContentVerificationService:
         if not S3StorageService.is_enabled():
             return {"url": str(temp_path.resolve())}
 
+        preview = {}
+        if content_type == "document" and is_pdf_file(
+            mime_type=upload_content_type, filename=safe_name
+        ):
+            preview = create_pdf_first_page_preview(
+                source_path=temp_path,
+                owner_id=0,
+                content_public_id=f"verify-{zlib.crc32(safe_name.encode('utf-8')) & 0xFFFFFFFF}",
+                filename=safe_name,
+            )
+
         key = S3StorageService.build_content_key(
             owner_id=0,
             content_public_id=f"verify-{zlib.crc32(safe_name.encode('utf-8')) & 0xFFFFFFFF}",
@@ -541,11 +582,16 @@ class ContentVerificationService:
             key,
             settings.AWS_STORAGE_BUCKET_NAME,
         )
-        return {
+        source_input = {
             "url": S3StorageService.generate_presigned_get_url(key=key),
             "s3_key": key,
             "s3_uri": S3StorageService.build_s3_uri(key=key),
         }
+        if preview.get("preview_url"):
+            source_input["preview_url"] = preview["preview_url"]
+        if preview.get("preview_key"):
+            source_input["preview_key"] = preview["preview_key"]
+        return source_input
 
     @classmethod
     def _resolve_wm_id(cls, payload_id: str | None) -> int:
@@ -558,6 +604,11 @@ class ContentVerificationService:
     def _resolve_content_image_url(cls, content: Content | None) -> str | None:
         if not content:
             return None
+
+        if content.content_type == "document":
+            preview_url = resolve_content_document_preview_url(content)
+            if preview_url:
+                return preview_url
 
         watermark = content.watermark or {}
         output_key = watermark.get("output_key")

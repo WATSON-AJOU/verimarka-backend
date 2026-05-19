@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -209,3 +210,73 @@ class ContentBlockchainFilenameTests(TestCase):
         self.assertEqual(error_message, "이미 이 투표에 참여했습니다.")
         self.assertFalse(retryable)
         self.assertEqual(status_code, 409)
+
+    @patch.object(ContentBlockchainService, "_create_client")
+    def test_sync_review_vote_finalizes_pending_vote_after_72_hours_without_end_time(
+        self, mocked_create_client
+    ):
+        blockchain = Mock()
+        blockchain.chain_id = 11155111
+        blockchain.contract_address = "0xabc"
+        old_timestamp = int((timezone.now() - timedelta(days=4)).timestamp())
+        blockchain.verify_document.side_effect = [
+            {
+                "exists": True,
+                "token_id": 77,
+                "owner": "0x1234567890123456789012345678901234567890",
+                "status": "Pending",
+                "verification_link": "https://example.com/verify/77",
+                "author_name": "Chain User",
+                "file_name": "review-name.png",
+            },
+            {
+                "exists": True,
+                "token_id": 77,
+                "owner": "0x1234567890123456789012345678901234567890",
+                "status": "Approved",
+                "verification_link": "https://example.com/verify/77",
+                "author_name": "Chain User",
+                "file_name": "review-name.png",
+            },
+        ]
+        blockchain.get_document_info.side_effect = [
+            {
+                "status": "Pending",
+                "upvotes": 2,
+                "downvotes": 0,
+                "end_time": 0,
+                "timestamp": old_timestamp,
+                "author_name": "Chain User",
+                "file_name": "review-name.png",
+            },
+            {
+                "status": "Approved",
+                "upvotes": 2,
+                "downvotes": 0,
+                "end_time": 0,
+                "timestamp": old_timestamp,
+                "author_name": "Chain User",
+                "file_name": "review-name.png",
+            },
+        ]
+        mocked_create_client.return_value = blockchain
+
+        content = self._create_content(
+            decision="review", status="review", filename="review-name.png"
+        )
+        content.blockchain = {
+            "minted": True,
+            "mint_kind": "review_vote",
+            "wm_id": 4242,
+            "token_id": 77,
+            "recipient_address": "0x1234567890123456789012345678901234567890",
+            "vote": {"status": "Pending", "vote_id": "VOTE-77"},
+        }
+        content.save(update_fields=["blockchain", "updated_at"])
+
+        updated = ContentBlockchainService.sync_review_vote(content=content)
+
+        blockchain.finalize_status.assert_called_once_with(77)
+        self.assertEqual(updated.blockchain["vote"]["status"], "Approved")
+        self.assertIsNotNone(updated.blockchain["vote"]["end_time"])
+        self.assertEqual(updated.decision, "allow")

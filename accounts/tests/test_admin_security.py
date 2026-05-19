@@ -73,6 +73,79 @@ def test_admin_can_demote_another_admin_when_active_admin_remains(db):
     assert target.is_superuser is False
 
 
+def test_staff_admin_cannot_change_admin_role(db):
+    actor = _create_user("staff-actor", is_staff=True, is_superuser=False)
+    target = _create_user("staff-target")
+    client = APIClient()
+    client.force_authenticate(actor)
+
+    response = client.patch(
+        reverse("admin_user_detail", kwargs={"user_id": target.id}),
+        {"role": "관리자"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    target.refresh_from_db()
+    assert target.is_staff is False
+    assert target.is_superuser is False
+
+
+def test_admin_role_promotion_does_not_grant_superuser(db):
+    actor = _create_user("super-actor", is_staff=True, is_superuser=True)
+    target = _create_user("promote-target")
+    client = APIClient()
+    client.force_authenticate(actor)
+
+    response = client.patch(
+        reverse("admin_user_detail", kwargs={"user_id": target.id}),
+        {"role": "관리자"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    target.refresh_from_db()
+    assert target.is_staff is True
+    assert target.is_superuser is False
+
+
+def test_deleted_user_is_not_exposed_in_admin_detail(db):
+    admin = _create_user("admin-deleted-detail", is_staff=True, is_superuser=True)
+    target = _create_user("deleted-target")
+    target.is_deleted = True
+    target.save(update_fields=["is_deleted"])
+    client = APIClient()
+    client.force_authenticate(admin)
+
+    response = client.get(reverse("admin_user_detail", kwargs={"user_id": target.id}))
+
+    assert response.status_code == 404
+
+
+def test_deleted_admin_cannot_login_with_password(db):
+    email = "deleted-admin@example.com"
+    User.objects.create_user(
+        username=email,
+        email=email,
+        password="Password123!",
+        nickname="deleted-admin",
+        display_name="deleted-admin",
+        is_staff=True,
+        is_superuser=True,
+        is_deleted=True,
+    )
+    client = APIClient()
+
+    response = client.post(
+        reverse("admin_login"),
+        {"email": email, "password": "Password123!"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "탈퇴한 계정" in str(response.data)
+
+
 def test_admin_user_detail_limits_recent_activity_page(db):
     admin = _create_user("admin-activity", is_staff=True, is_superuser=True)
     target = _create_user("activity-target")

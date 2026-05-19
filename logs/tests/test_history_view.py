@@ -106,6 +106,37 @@ class AnalysisHistoryViewTests(TestCase):
         self.assertEqual(len(payload), 2)
         self.assertEqual({item["type"] for item in payload}, {"review", "allow"})
 
+    def test_pending_review_vote_after_deadline_uses_confirmation_waiting_summary(self):
+        Content.objects.create(
+            owner=self.user,
+            content_type="image",
+            status="review",
+            decision="review",
+            original_file="",
+            original_filename="review-expired.png",
+            mime_type="image/png",
+            file_size=123,
+            reason="커뮤니티 검증 진행 중",
+            top_cosine=0.79,
+            top_phash_dist=7,
+            blockchain={
+                "mint_kind": "review_vote",
+                "vote": {
+                    "status": "Pending",
+                    "upvotes": 0,
+                    "downvotes": 0,
+                    "end_time": (timezone.now() - timedelta(hours=1)).isoformat(),
+                },
+            },
+        )
+
+        response = self.client.get(reverse("analysis_history"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload[0]["type"], "review")
+        self.assertEqual(payload[0]["summary"], "투표 마감 및 확인 대기")
+
     def test_approved_review_vote_without_watermark_does_not_look_minted(self):
         Content.objects.create(
             owner=self.user,
