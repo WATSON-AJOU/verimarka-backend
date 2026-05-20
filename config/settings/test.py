@@ -16,6 +16,7 @@ MIGRATION_MODULES = {
     "analysis": None,
     "contents": None,
     "logs": None,
+    "operations": None,
     "reviews": None,
     "tokens": None,
     "wallets": None,

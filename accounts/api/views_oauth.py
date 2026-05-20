@@ -39,6 +39,7 @@ from accounts.services.kakao_oauth import (
 from accounts.services.kakao_oauth import (
     fetch_userinfo as kakao_fetch_userinfo,
 )
+from operations.services import record_active_policy_consents
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -254,6 +255,7 @@ def _get_or_create_social_user(
         email=user_email or "",
         last_login_at=timezone.now(),
     )
+    record_active_policy_consents(user=user)
     return user, social, True, None
 
 
