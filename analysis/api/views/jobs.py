@@ -12,11 +12,16 @@ from analysis.models import AIJob
 from contents.api.serializers import ContentSerializer
 
 TERMINAL_JOB_STATUSES = {"success", "failure"}
+STREAM_HEARTBEAT_SECONDS = 15
 
 
-def _build_job_payload(job: AIJob, request) -> dict:
+def _build_job_payload(
+    job: AIJob, request, *, include_content: bool | None = None
+) -> dict:
     content_payload = None
-    if job.content:
+    if include_content is None:
+        include_content = job.status == "success"
+    if include_content and job.content:
         content_payload = ContentSerializer(
             job.content, context={"request": request}
         ).data
@@ -74,6 +79,7 @@ class AIJobStreamView(APIView):
 
         def event_stream():
             last_signature = None
+            last_heartbeat = time.monotonic()
             deadline = time.monotonic() + 60 * 10
             while time.monotonic() < deadline:
                 job = (
@@ -96,6 +102,10 @@ class AIJobStreamView(APIView):
                 if signature != last_signature:
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     last_signature = signature
+                    last_heartbeat = time.monotonic()
+                elif time.monotonic() - last_heartbeat >= STREAM_HEARTBEAT_SECONDS:
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = time.monotonic()
 
                 if job.status in TERMINAL_JOB_STATUSES:
                     return
