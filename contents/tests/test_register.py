@@ -356,7 +356,7 @@ class ContentRegisterViewTests(TestCase):
         return_value="s3://bucket/original/1/test/file.png",
     )
     @patch("analysis.tasks.run_register_analysis_job.delay")
-    def test_register_blocks_duplicate_source_after_success(
+    def test_register_allows_duplicate_source_after_analysis_only_success(
         self, mocked_delay, *_mocks
     ):
         mocked_delay.return_value.id = "celery-task-1"
@@ -380,9 +380,116 @@ class ContentRegisterViewTests(TestCase):
             reverse("content_register"), {"file": second_upload}, format="multipart"
         )
 
-        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 202)
         payload = second_response.json()
-        self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["content"]["decision"], "block")
-        self.assertEqual(payload["content"]["status"], "block")
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["content"]["status"], "pending")
         self.assertEqual(Content.objects.count(), 2)
+        self.assertEqual(AIJob.objects.filter(job_type="register").count(), 2)
+        self.assertEqual(mocked_delay.call_count, 2)
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.api.services.registration.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch(
+        "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/file.png",
+    )
+    @patch(
+        "contents.api.services.registration.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/original/1/test/file.png",
+    )
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_allows_duplicate_source_after_watermark_applied(
+        self, mocked_delay, *_mocks
+    ):
+        mocked_delay.return_value.id = "celery-task-1"
+        first_upload = SimpleUploadedFile(
+            "sample.png", b"\x89PNG\r\n\x1a\nsamecontent", content_type="image/png"
+        )
+        first_response = self.client.post(
+            reverse("content_register"), {"file": first_upload}, format="multipart"
+        )
+
+        self.assertEqual(first_response.status_code, 202)
+        first_content = Content.objects.get()
+        first_content.watermark = {
+            "applied": True,
+            "output_key": "watermarked/sample.png",
+        }
+        first_content.save(update_fields=["watermark", "updated_at"])
+        AIJob.objects.filter(content=first_content, job_type="register").update(
+            status="success"
+        )
+
+        second_upload = SimpleUploadedFile(
+            "sample.png", b"\x89PNG\r\n\x1a\nsamecontent", content_type="image/png"
+        )
+        second_response = self.client.post(
+            reverse("content_register"), {"file": second_upload}, format="multipart"
+        )
+
+        self.assertEqual(second_response.status_code, 202)
+        payload = second_response.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["content"]["status"], "pending")
+        self.assertEqual(Content.objects.count(), 2)
+        self.assertEqual(AIJob.objects.filter(job_type="register").count(), 2)
+        self.assertEqual(mocked_delay.call_count, 2)
+
+    @patch("contents.api.views.S3StorageService.is_enabled", return_value=True)
+    @patch(
+        "contents.api.services.registration.S3StorageService.is_enabled",
+        return_value=True,
+    )
+    @patch("contents.api.services.registration.S3StorageService.upload_file")
+    @patch(
+        "contents.api.services.registration.S3StorageService.generate_presigned_get_url",
+        return_value="https://example.com/file.png",
+    )
+    @patch(
+        "contents.api.services.registration.S3StorageService.build_s3_uri",
+        return_value="s3://bucket/original/1/test/file.png",
+    )
+    @patch("analysis.tasks.run_register_analysis_job.delay")
+    def test_register_allows_duplicate_source_after_content_mint(
+        self, mocked_delay, *_mocks
+    ):
+        mocked_delay.return_value.id = "celery-task-1"
+        first_upload = SimpleUploadedFile(
+            "sample.png", b"\x89PNG\r\n\x1a\nsamecontent", content_type="image/png"
+        )
+        first_response = self.client.post(
+            reverse("content_register"), {"file": first_upload}, format="multipart"
+        )
+
+        self.assertEqual(first_response.status_code, 202)
+        first_content = Content.objects.get()
+        first_content.blockchain = {
+            "minted": True,
+            "mint_kind": "content",
+            "token_id": 1,
+            "tx_hash": "0xminted",
+        }
+        first_content.save(update_fields=["blockchain", "updated_at"])
+        AIJob.objects.filter(content=first_content, job_type="register").update(
+            status="success"
+        )
+
+        second_upload = SimpleUploadedFile(
+            "sample.png", b"\x89PNG\r\n\x1a\nsamecontent", content_type="image/png"
+        )
+        second_response = self.client.post(
+            reverse("content_register"), {"file": second_upload}, format="multipart"
+        )
+
+        self.assertEqual(second_response.status_code, 202)
+        payload = second_response.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["content"]["status"], "pending")
+        self.assertEqual(Content.objects.count(), 2)
+        self.assertEqual(AIJob.objects.filter(job_type="register").count(), 2)
+        self.assertEqual(mocked_delay.call_count, 2)

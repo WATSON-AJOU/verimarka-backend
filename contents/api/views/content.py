@@ -137,63 +137,6 @@ class ContentRegisterView(APIView):
                         existing_job, existing_content, request
                     )
 
-                blocked_duplicate_source = (
-                    existing_content
-                    if existing_job is not None and existing_job.status == "success"
-                    else next(
-                        (
-                            item
-                            for item in matching_contents
-                            if (
-                                (
-                                    bool((item.blockchain or {}).get("minted"))
-                                    and (item.blockchain or {}).get("mint_kind")
-                                    == "content"
-                                )
-                                or (
-                                    bool((item.watermark or {}).get("applied"))
-                                    and (
-                                        (item.watermark or {}).get("output_key")
-                                        or (item.watermark or {}).get("output_url")
-                                    )
-                                )
-                            )
-                        ),
-                        None,
-                    )
-                )
-                if blocked_duplicate_source is not None:
-                    duplicate_content = (
-                        ContentRegistrationService.create_blocked_duplicate_content(
-                            user=request.user,
-                            upload=upload,
-                            source_sha256=source_sha256,
-                            existing_content=blocked_duplicate_source,
-                            temp_path=temp_path,
-                            content_type_override=effective_content_type,
-                        )
-                    )
-                    duplicate_job = AIJob.objects.create(
-                        owner=request.user,
-                        content=duplicate_content,
-                        job_type="register",
-                        status="success",
-                        progress=100,
-                        progress_message="동일 원본 파일 확인이 완료되었습니다.",
-                        request_payload={
-                            "duplicate_of": str(blocked_duplicate_source.public_id)
-                        },
-                        response_payload={
-                            "content_public_id": str(duplicate_content.public_id)
-                        },
-                    )
-                    return _build_async_job_response(
-                        duplicate_job,
-                        duplicate_content,
-                        request,
-                        status_code=status.HTTP_200_OK,
-                    )
-
             content = ContentRegistrationService.create_pending_content(
                 user=request.user,
                 upload=upload,
