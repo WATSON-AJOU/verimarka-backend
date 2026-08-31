@@ -28,6 +28,7 @@ from contents.api.utils import build_content_preview_url
 from contents.models import Content
 from contents.storage import S3StorageService
 from logs.models import VerificationHistoryLog
+from operations.api.utils import log_admin_action
 from wallets.api.utils import normalize_wallet_type
 
 DEFAULT_LIST_PAGE_SIZE = 15
@@ -83,6 +84,15 @@ def _format_date(value) -> str:
     if not value:
         return "-"
     return timezone.localtime(value).strftime("%Y-%m-%d")
+
+
+def _parse_date_param(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
 
 
 def _role_label(user: User) -> str:
@@ -756,7 +766,26 @@ class AdminUserDetailView(APIView):
         guard_response = _admin_update_guard(request, user, serializer.validated_data)
         if guard_response is not None:
             return guard_response
+        before = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+            "is_active": user.is_active,
+        }
         serializer.update(user, serializer.validated_data)
+        after = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+            "is_active": user.is_active,
+        }
+        log_admin_action(
+            request=request,
+            action="user_update",
+            target_type="user",
+            target_id=user.pk,
+            reason="관리자 회원 정보 변경",
+            before=before,
+            after=after,
+        )
         payload = _serialize_user_detail(user, request)
         return Response(AdminUserDetailSerializer(payload).data)
 
@@ -787,6 +816,21 @@ class AdminImageListView(APIView):
                 queryset = queryset.filter(
                     Q(decision=normalized_status) | Q(status=normalized_status)
                 )
+
+        content_type = (request.query_params.get("content_type") or "").strip()
+        if content_type in {"image", "document"}:
+            queryset = queryset.filter(content_type=content_type)
+
+        job_status = (request.query_params.get("job_status") or "").strip()
+        if job_status:
+            queryset = queryset.filter(ai_jobs__status=job_status).distinct()
+
+        uploaded_from = _parse_date_param(request.query_params.get("uploaded_from"))
+        if uploaded_from:
+            queryset = queryset.filter(created_at__date__gte=uploaded_from)
+        uploaded_to = _parse_date_param(request.query_params.get("uploaded_to"))
+        if uploaded_to:
+            queryset = queryset.filter(created_at__date__lte=uploaded_to)
 
         sort_by = (request.query_params.get("sort") or "최신순").strip()
         queryset = queryset.order_by(

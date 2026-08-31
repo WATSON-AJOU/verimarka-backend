@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "analysis",
     "contents",
     "logs",
+    "operations",
     "reviews",
     "tokens",
     "wallets",

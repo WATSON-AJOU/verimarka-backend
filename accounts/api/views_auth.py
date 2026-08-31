@@ -20,6 +20,7 @@ from accounts.api.token_cookies import (
     get_refresh_token_from_request,
     set_refresh_cookie,
 )
+from operations.services import record_active_policy_consents
 
 
 def _get_client_ip(request) -> str | None:
@@ -88,6 +89,7 @@ class SignupView(APIView):
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        record_active_policy_consents(user=user, request=request)
 
         refresh = RefreshToken.for_user(user)
         return build_auth_response(

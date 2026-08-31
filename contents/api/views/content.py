@@ -47,15 +47,29 @@ def _build_async_job_response(
     job: AIJob, content: Content, request, *, status_code=status.HTTP_202_ACCEPTED
 ):
     progress = 100 if job.status == "success" else job.progress
+    content_payload = None
+    if job.status == "success":
+        content_payload = ContentSerializer(content, context={"request": request}).data
     return Response(
         {
             "job_id": str(job.public_id),
             "status": job.status,
             "progress": progress,
             "progress_message": job.progress_message,
-            "content": ContentSerializer(content, context={"request": request}).data,
+            "content": content_payload,
         },
         status=status_code,
+    )
+
+
+def _has_content_mint(content: Content) -> bool:
+    blockchain = content.blockchain or {}
+    token_id = blockchain.get("token_id")
+    return bool(
+        blockchain.get("mint_kind") == "content"
+        and blockchain.get("minted")
+        and blockchain.get("tx_hash")
+        and token_id not in (None, 0, "0")
     )
 
 
@@ -396,6 +410,19 @@ class ContentMintView(APIView):
 
     def post(self, request, public_id):
         content = get_object_or_404(Content, public_id=public_id, owner=request.user)
+
+        if _has_content_mint(content):
+            logger.info(
+                "contents.mint.idempotent_completed user_id=%s content_id=%s token_id=%s tx_hash=%s",
+                getattr(request.user, "id", None),
+                content.public_id,
+                (content.blockchain or {}).get("token_id"),
+                (content.blockchain or {}).get("tx_hash"),
+            )
+            return Response(
+                ContentSerializer(content, context={"request": request}).data,
+                status=status.HTTP_200_OK,
+            )
 
         content = ContentBlockchainService.mint(content=content)
 
