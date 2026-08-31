@@ -1,0 +1,19 @@
+aws_region  = "ap-northeast-2"
+environment = "prod"
+
+# 현재 SSH 기반 GitHub Actions 배포를 사용하려면 AWS에 미리 만든 키 페어 이름과
+# GitHub-hosted runner 또는 운영자 고정 IP CIDR을 설정해야 합니다.
+ec2_key_name     = "verimarka-prod"
+ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+# 이 파일을 terraform.tfvars로 복사한 뒤 실제 강력한 비밀번호로 변경하세요.
+# terraform.tfvars와 terraform.tfstate는 Git에서 제외되지만 로컬 디스크에는 평문으로 남습니다.
+db_password = "replace-with-a-strong-password"
+
+# AI 모델의 메모리/CPU 요구량에 맞춰 조정하세요.
+ec2_instance_type = "t3.large"
+db_instance_class = "db.t4g.micro"
+db_multi_az       = false
+
+# null이면 AWS가 고유 suffix를 붙인 버킷 이름을 생성합니다.
+s3_bucket_name = null

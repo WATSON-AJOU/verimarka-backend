@@ -90,3 +90,5 @@ AI 생성물이 빠르게 늘어나면서 원본성, 소유권, 등록 가능성
 ## 9. 실행 방법
 
 실행 방법은 [docs/SETUP.md](./docs/SETUP.md)를 참고하세요.
+
+AWS 운영 인프라 생성 방법은 [infra/terraform/README.md](./infra/terraform/README.md)를 참고하세요.
