@@ -24,3 +24,15 @@ test_media/*
 
 deploy/certbot/conf/
 deploy/certbot/www/
+
+# Terraform local state and generated files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+!*.tfvars.example
